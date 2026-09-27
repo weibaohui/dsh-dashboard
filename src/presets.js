@@ -17,6 +17,16 @@ const CARD_TYPES = Object.freeze({
   errorSamples: '错误样本表（分类 + 聚簇 + 最新原文）',
   retryCodes: '供应商 × 错误码榜（LLM 重试分类）',
   insights: '专项洞察（异常日/最贵会话/慢工具/命令失败率）',
+  stack: '竖向堆叠柱（时间 × 维度构成）',
+  treemap: '层级矩形树图（项目 → 模型 构成，style=sunburst 切旭日）',
+  sankey: '供应商 → 项目 流向图',
+  themeRiver: '模型活跃主题河流',
+  radar: '模型质量雷达（速度/经济性/稳定性/规模/可靠性）',
+  parallel: '会话多维平行坐标',
+  boxplot: '速度分布箱线图（按模型）',
+  candle: '每日速度区间 K 线',
+  histogram: '输入长度分布直方图',
+  gauge: '费用预算仪表盘（需在设置里配置月预算）',
 })
 
 /** 查询字段目录。 */
@@ -31,7 +41,7 @@ const QUERY_FIELDS = Object.freeze({
 })
 
 const GRANULARITIES = ['day', 'week', 'month']
-const GROUP_BYS = ['model', 'tool', 'skill', 'cmd', 'slash', 'project', 'session', '']
+const GROUP_BYS = ['model', 'project_model', 'tool', 'skill', 'cmd', 'slash', 'project', 'session', '']
 const RANGES = ['today', '7', '30', '90', '365', 'all']
 
 /** /api/catalog 返回体（client 卡片编辑器和 AI 提示词共用）。 */
@@ -94,15 +104,23 @@ function defaultPages() {
       title: 'Token 与费用',
       cols: 12,
       layout: [
-        { i: 'cost-trend', ...cell(0, 0, 8, 6) },
-        { i: 'cost-pie', ...cell(8, 0, 4, 6) },
-        { i: 'cost-cache', ...cell(0, 6, 8, 6) },
-        { i: 'cost-table', ...cell(8, 6, 4, 6) },
+        { i: 'cost-gauge', ...cell(0, 0, 3, 4) },
+        { i: 'cost-trend', ...cell(3, 0, 9, 4) },
+        { i: 'cost-stack', ...cell(0, 4, 12, 4) },
+        { i: 'cost-treemap', ...cell(0, 8, 6, 6) },
+        { i: 'cost-sankey', ...cell(6, 8, 6, 6) },
+        { i: 'cost-cache', ...cell(0, 14, 6, 5) },
+        { i: 'cost-pie', ...cell(6, 14, 3, 5) },
+        { i: 'cost-table', ...cell(9, 14, 3, 5) },
       ],
       cards: {
+        'cost-gauge': { type: 'gauge', title: '本月费用预算', query: { range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'cost-trend': { type: 'line', title: '每日费用趋势（90 天）', query: { measures: ['cost'], range: '90', granularity: 'day', scope: 'all' }, options: {} },
-        'cost-pie': { type: 'pie', title: '费用构成 · 按模型（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 8 } },
+        'cost-stack': { type: 'stack', title: '每日 token 按模型堆叠（30 天）', query: { measures: ['totalTok'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 6 } },
+        'cost-treemap': { type: 'treemap', title: '项目 → 模型 费用构成（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', groupBy: 'project_model', scope: 'all' }, options: {} },
+        'cost-sankey': { type: 'sankey', title: '供应商 → 项目 费用流向（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'cost-cache': { type: 'line', title: '缓存命中率 %（30 天）', query: { measures: ['cacheReadTok', 'inTok'], formula: 'pct(cacheReadTok, cacheReadTok + inTok)', range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'cost-pie': { type: 'pie', title: '费用构成 · 按模型（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 8 } },
         'cost-table': { type: 'table', title: '按模型明细（30 天）', query: { measures: ['msgs', 'inTok', 'outTok', 'cost', 'speed'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 12 } },
       },
     },
@@ -111,14 +129,20 @@ function defaultPages() {
       title: '模型与质量',
       cols: 12,
       layout: [
-        { i: 'q-speed', ...cell(0, 0, 6, 6) },
-        { i: 'q-errrate', ...cell(6, 0, 6, 6) },
-        { i: 'q-table', ...cell(0, 6, 8, 6) },
-        { i: 'q-retry', ...cell(8, 6, 4, 6) },
+        { i: 'q-speed', ...cell(0, 0, 6, 5) },
+        { i: 'q-errrate', ...cell(6, 0, 6, 5) },
+        { i: 'q-radar', ...cell(0, 5, 4, 7) },
+        { i: 'q-box', ...cell(4, 5, 4, 7) },
+        { i: 'q-candle', ...cell(8, 5, 4, 7) },
+        { i: 'q-table', ...cell(0, 12, 8, 6) },
+        { i: 'q-retry', ...cell(8, 12, 4, 6) },
       ],
       cards: {
         'q-speed': { type: 'line', title: '输出速度 tokens/s（30 天，按模型）', query: { measures: ['decodeTok', 'decodeMs'], formula: 'perSec(decodeTok, decodeMs)', range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 6 } },
         'q-errrate': { type: 'line', title: '回合错误率 %（30 天）', query: { measures: ['turnsError', 'turns'], formula: 'pct(turnsError, turns)', range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'q-radar': { type: 'radar', title: '模型质量雷达（30 天）', query: { range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 5 } },
+        'q-box': { type: 'boxplot', title: '速度分布箱线图 · 按模型（30 天）', query: { range: '30', granularity: 'day', scope: 'all' }, options: { top: 6 } },
+        'q-candle': { type: 'candle', title: '每日速度区间 K 线（30 天）', query: { range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'q-table': { type: 'table', title: '模型质量明细（30 天）', query: { measures: ['msgs', 'retries', 'errorRate', 'speed', 'turnsError'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 12 } },
         'q-retry': { type: 'bar', title: '重试榜 · 按模型（30 天）', query: { measures: ['retries'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 8 } },
       },
@@ -149,12 +173,14 @@ function defaultPages() {
         { i: 'w-sessions', ...cell(7, 0, 5, 7) },
         { i: 'w-turns', ...cell(0, 7, 7, 6) },
         { i: 'w-proj', ...cell(7, 7, 5, 6) },
+        { i: 'w-parallel', ...cell(0, 13, 12, 6) },
       ],
       cards: {
         'w-punch': { type: 'punchcard', title: '工作时段（90 天 · 星期 × 小时）', query: { range: '90', scope: 'all' }, options: {} },
         'w-sessions': { type: 'sessions', title: '最近会话（30 天）', query: { range: '30', scope: 'all' }, options: {} },
         'w-turns': { type: 'line', title: '每日回合与错误（30 天）', query: { measures: ['turns', 'turnsError'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'w-proj': { type: 'bar', title: '项目榜（30 天 · 输出 tokens）', query: { measures: ['outTok'], range: '30', granularity: 'day', groupBy: 'project', scope: 'all' }, options: { top: 10 } },
+        'w-parallel': { type: 'parallel', title: '会话多维对比（30 天 · Top 30）', query: { range: '30', scope: 'all' }, options: {} },
       },
     },
     {
@@ -188,6 +214,7 @@ function defaultPages() {
         { i: 'i-in-trend', ...cell(0, 2, 6, 6) },
         { i: 'i-len-trend', ...cell(6, 2, 6, 6) },
         { i: 'i-sess', ...cell(0, 8, 12, 7) },
+        { i: 'i-hist', ...cell(0, 15, 12, 5) },
       ],
       cards: {
         'i-in-today': { type: 'stat', title: '今日输入次数', query: { measures: ['userMsgs'], range: 'today', granularity: 'day', scope: 'all' }, options: { unit: '次' } },
@@ -197,6 +224,7 @@ function defaultPages() {
         'i-in-trend': { type: 'line', title: '每日输入次数与字符量（30 天）', query: { measures: ['userMsgs', 'userInputChars'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'i-len-trend': { type: 'line', title: '平均输入长度（30 天，字符/条）', query: { formula: 'userInputChars / userMsgs', range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'i-sess': { type: 'sessions', title: '会话明细（输入 / 运行时长 / 费用）', query: { range: '30', scope: 'all' }, options: {} },
+        'i-hist': { type: 'histogram', title: '输入长度分布（30 天）', query: { range: '30', granularity: 'day', scope: 'all' }, options: {} },
       },
     },
   ]

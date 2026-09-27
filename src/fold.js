@@ -134,6 +134,8 @@ function emptyDay() {
     turnsUser: 0,
     userMsgs: 0,
     userInputChars: 0,
+    inputLenRes: [],
+    speedRes: [],
     activeMs: 0,
     subagents: 0,
     retries: 0,
@@ -196,10 +198,20 @@ function modelEntry(byModel, model) {
   const key = model || 'unknown'
   let e = byModel[key]
   if (!e) {
-    if (Object.keys(byModel).length >= MAX_MAP_KEYS) return byModel.unknown || (byModel.unknown = { msgs: 0, msgsNoUsage: 0, inTok: 0, outTok: 0, cacheReadTok: 0, cacheWriteTok: 0, decodeMs: 0, decodeTok: 0, speedSamples: 0, retries: 0 })
-    e = byModel[key] = { msgs: 0, msgsNoUsage: 0, inTok: 0, outTok: 0, cacheReadTok: 0, cacheWriteTok: 0, decodeMs: 0, decodeTok: 0, speedSamples: 0, retries: 0 }
+    if (Object.keys(byModel).length >= MAX_MAP_KEYS) return byModel.unknown || (byModel.unknown = { msgs: 0, msgsNoUsage: 0, inTok: 0, outTok: 0, cacheReadTok: 0, cacheWriteTok: 0, decodeMs: 0, decodeTok: 0, speedSamples: 0, speedRes: [], retries: 0 })
+    e = byModel[key] = { msgs: 0, msgsNoUsage: 0, inTok: 0, outTok: 0, cacheReadTok: 0, cacheWriteTok: 0, decodeMs: 0, decodeTok: 0, speedSamples: 0, speedRes: [], retries: 0 }
   }
+  if (!Array.isArray(e.speedRes)) e.speedRes = []
   return e
+}
+
+/** 蓄水池抽样：cap 之前全收，之后等概率替换（counter 保证确定性）。 */
+function resPush(arr, v, cap, counter) {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return
+  if (arr.length < cap) { arr.push(v); counter.n += 1; return }
+  const idx = counter.n % cap
+  counter.n += 1
+  arr[idx] = v
 }
 
 function toolEntry(byTool, tool) {
@@ -272,9 +284,10 @@ function foldSession(sessionId, events) {
   let headerSeen = false
   let haveData = false
   // 配对缓冲
-  const openCalls = new Map() // callId → {time, name}
+  const openCalls = new Map() // callId → {time, name, cmd}
   const openTurns = new Map() // turn# → startTime
   const openSteps = new Map() // 'turn:step' → startTime
+  const resCounter = { n: 0 } // 蓄水池替换计数器
 
   const dayOf = (time) => {
     const key = localDate(time || Date.now())
@@ -320,7 +333,9 @@ function foldSession(sessionId, events) {
         // 真实输入在 data.content；兼容 data.message.content 形态
         const ucontent = (Array.isArray(data.content) && data.content) ||
           (data.message && Array.isArray(data.message.content) ? data.message.content : null)
-        day.userInputChars += messageTextLength(ucontent)
+        const chars = messageTextLength(ucontent)
+        day.userInputChars += chars
+        resPush(day.inputLenRes, chars, 64, resCounter)
         break
       }
       case 'turn/start': {
@@ -389,6 +404,9 @@ function foldSession(sessionId, events) {
             me.decodeMs += window
             me.decodeTok += output
             me.speedSamples += 1
+            const speed = output / (window / 1000)
+            resPush(day.speedRes, speed, 64, resCounter)
+            resPush(me.speedRes, speed, 32, resCounter)
           }
         } else {
           day.msgsNoUsage += 1
@@ -661,6 +679,7 @@ function aggregate(facts, q) {
 function groupKeysOf(day, fact, groupBy) {
   switch (groupBy) {
     case 'model': return Object.keys(day.byModel)
+    case 'project_model': return Object.keys(day.byModel).map((m) => (fact.project || '未知') + '/' + m)
     case 'tool': return Object.keys(day.byTool)
     case 'skill': return Object.keys(day.bySkill)
     case 'cmd': return Object.keys(day.byCmd)
@@ -669,6 +688,11 @@ function groupKeysOf(day, fact, groupBy) {
     case 'session': return [fact.sessionId]
     default: return ['']
   }
+}
+
+/** project_model 复合键 → 模型名（project 不含 '/'，首个 '/' 后即完整模型名）。 */
+function pmModel(key) {
+  return key.slice(key.indexOf('/') + 1)
 }
 
 function addGroupNums(acc, day, groupBy, key) {
@@ -684,6 +708,18 @@ function addGroupNums(acc, day, groupBy, key) {
     acc.decodeMs += me.decodeMs
     acc.decodeTok += me.decodeTok
     acc.speedSamples += me.speedSamples || 0
+    acc.retries += me.retries || 0
+  } else if (groupBy === 'project_model') {
+    const me = day.byModel[pmModel(key)]
+    if (!me) return
+    acc.msgs += me.msgs
+    acc.msgsNoUsage += me.msgsNoUsage || 0
+    acc.inTok += me.inTok
+    acc.outTok += me.outTok
+    acc.cacheReadTok += me.cacheReadTok
+    acc.cacheWriteTok += me.cacheWriteTok
+    acc.decodeMs += me.decodeMs
+    acc.decodeTok += me.decodeTok
     acc.retries += me.retries || 0
   } else if (groupBy === 'tool') {
     const te = day.byTool[key]
@@ -703,15 +739,139 @@ function addGroupNums(acc, day, groupBy, key) {
 }
 
 function groupCost(day, groupBy, key, pricing) {
-  if (groupBy === 'model') {
-    const me = day.byModel[key]
+  if (groupBy === 'model' || groupBy === 'project_model') {
+    const model = groupBy === 'project_model' ? pmModel(key) : key
+    const me = groupBy === 'project_model' ? day.byModel[model] : day.byModel[key]
     if (!me) return 0
-    const p = lookupPrice(pricing, key)
+    const p = lookupPrice(pricing, model)
     if (!p) return 0
     return (me.inTok * (p.in || 0) + me.outTok * (p.out || 0) + me.cacheReadTok * (p.cr || 0) + me.cacheWriteTok * (p.cw || 0)) / 1e6
   }
   if (groupBy === '') return modelCost(day.byModel, pricing)
   return 0
+}
+
+// ── 深度下钻与专项分析 ───────────────────────────────────────────────────────
+
+/** 分位数（线性插值）。arr 非空数字数组 → [min, p25, p50, p75, max]。 */
+function quantiles(arr) {
+  const s = arr.filter((v) => typeof v === 'number' && Number.isFinite(v)).sort((a, b) => a - b)
+  if (!s.length) return null
+  const q = (p) => {
+    const idx = p * (s.length - 1)
+    const lo = Math.floor(idx)
+    const hi = Math.ceil(idx)
+    return s[lo] + (s[hi] - s[lo]) * (idx - lo)
+  }
+  return [s[0], q(0.25), q(0.5), q(0.75), s[s.length - 1]]
+}
+
+/**
+ * 分布统计（/api/dist）：逐消息速度样本的按模型箱线 / 按日 K 线分位数 / 输入长度直方图。
+ * 依赖 day.speedRes / day.byModel[m].speedRes / day.inputLenRes 蓄水池（每 fold 重置）。
+ */
+function speedDist(facts, q) {
+  const scope = q.scope === 'top' ? 'top' : 'all'
+  const project = q.project || ''
+  const byModel = new Map() // model → speed values[]
+  const daily = new Map() // date → speed values[]（全模型）
+  const inputAll = [] // 输入长度全量
+  for (const fact of facts) {
+    if (!fact || !fact.days) continue
+    if (scope === 'top' && fact.depth > 0) continue
+    if (project && fact.project !== project) continue
+    for (const [dateStr, day] of Object.entries(fact.days)) {
+      if (q.from && dateStr < q.from) continue
+      if (q.to && dateStr > q.to) continue
+      if (Array.isArray(day.speedRes)) {
+        let cur = daily.get(dateStr)
+        if (!cur) { cur = []; daily.set(dateStr, cur) }
+        for (const v of day.speedRes) cur.push(v)
+      }
+      for (const [m, me] of Object.entries(day.byModel || {})) {
+        if (!Array.isArray(me.speedRes)) continue
+        if (!byModel.has(m)) byModel.set(m, [])
+        const arr = byModel.get(m)
+        for (const v of me.speedRes) if (arr.length < 4000) arr.push(v)
+      }
+      if (Array.isArray(day.inputLenRes)) for (const v of day.inputLenRes) inputAll.push(v)
+    }
+  }
+  const boxOf = (values) => {
+    const b = quantiles(values)
+    return b ? b.map((v) => Math.round(v * 10) / 10) : null
+  }
+  const byModelRows = [...byModel.entries()]
+    .map(([name, values]) => ({ name, n: values.length, box: values.length >= 4 ? boxOf(values) : null }))
+    .filter((r) => r.box)
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 8)
+  const dailyRows = [...daily.entries()]
+    .map(([date, values]) => ({ date, n: values.length, box: values.length >= 4 ? boxOf(values) : null }))
+    .filter((r) => r.box)
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+  // 输入长度直方图（12 箱，min→max 均分）
+  let input = { n: inputAll.length, bins: [], p50: null, p95: null }
+  if (inputAll.length >= 4) {
+    const b = quantiles(inputAll)
+    const lo = b[0]
+    const hi = b[4]
+    const step = (hi - lo) / 12 || 1
+    const bins = Array.from({ length: 12 }, (_, i) => ({ lo: Math.round(lo + i * step), hi: Math.round(lo + (i + 1) * step), count: 0 }))
+    for (const v of inputAll) {
+      const i = Math.min(11, Math.max(0, Math.floor((v - lo) / step)))
+      bins[i].count += 1
+    }
+    input = { n: inputAll.length, bins, p50: Math.round(b[2]), p95: Math.round(b[4]) }
+  }
+  return { byModel: byModelRows, dailySpeed: dailyRows, input }
+}
+
+/**
+ * 供应商 → 项目 资金/用量流向（sankey 数据）。
+ * @returns { nodes:[{name}], links:[{source,target,value}] }
+ */
+function flowsOf(facts, q, pricing) {
+  const scope = q.scope === 'top' ? 'top' : 'all'
+  const project = q.project || ''
+  const byCost = q.measure === 'cost'
+  const pricingMap = q.pricing || {}
+  const map = new Map() // 'provider → project' → value
+  const projTotals = new Map()
+  const provTotals = new Map()
+  for (const fact of facts) {
+    if (!fact || !fact.days) continue
+    if (scope === 'top' && fact.depth > 0) continue
+    if (project && fact.project !== project) continue
+    for (const day of Object.values(fact.days)) {
+      for (const [model, me] of Object.entries(day.byModel || {})) {
+        if (!me.outTok && !me.inTok) continue
+        const provider = String(model).split('/')[0] || '未知'
+        const proj = fact.project || '未知'
+        let value
+        if (byCost) {
+          const p = lookupPrice(pricingMap, model)
+          value = p ? (me.inTok * (p.in || 0) + me.outTok * (p.out || 0) + me.cacheReadTok * (p.cr || 0) + me.cacheWriteTok * (p.cw || 0)) / 1e6 : 0
+        } else {
+          value = (me.outTok || 0) + (me.inTok || 0)
+        }
+        if (!(value > 0)) continue
+        const k = provider + ' → ' + proj
+        map.set(k, (map.get(k) || 0) + value)
+        projTotals.set(proj, (projTotals.get(proj) || 0) + value)
+        provTotals.set(provider, (provTotals.get(provider) || 0) + value)
+      }
+    }
+  }
+  const links = [...map.entries()]
+    .map(([k, value]) => {
+      const sep = k.indexOf(' → ')
+      return { source: k.slice(0, sep), target: k.slice(sep + 3), value: Math.round(value) }
+    })
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 40)
+  const nodes = [...new Set([...links.flatMap((l) => [l.source, l.target])])].map((name) => ({ name }))
+  return { nodes, links, byProvider: [...provTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })), byProject: [...projTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })) }
 }
 
 /** 会话级汇总行（/api/sessions）。 */
@@ -1177,6 +1337,9 @@ module.exports = {
   summary,
   errorBreakdown,
   dayDetail,
+  flowsOf,
+  speedDist,
+  quantiles,
   modelDetail,
   sessionDetail,
   insights,

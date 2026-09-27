@@ -27,7 +27,8 @@
 - **三级下钻**：热力图点某天 → 当日明细（会话/工具/技能/命令/错误/小时热度）；模型榜点某模型 → 模型画像（逐日趋势/速度/重试/费用/Top 会话）；会话行点某行 → 会话画像（按天分解/模型分布/工具统计/错误样本）
 - **输出速度精确计量**：每条 assistant 消息内嵌流式 chunk 时序（delta 时间戳数组），解码窗口首尾相减得 tokens/s——按模型/按日出 p50 级精度，而非粗糙估算
 - **估算费用**：内置常见模型占位价格表，按模型 × in/out/缓存读写单价换算，UI 明示「估算」并列出未定价模型；价格表可视化编辑
-- **可编排**：gridstack 拖拽/缩放、加卡片、建页/改名/删页，布局与卡片配置即 JSON 自动持久化；八类 + 三类专项卡片
+- **可编排**：gridstack 拖拽/缩放、加卡片、建页/改名/删页，布局与卡片配置即 JSON 自动持久化
+- **22 种图类**：堆叠柱、矩形树图（项目→模型构成）、旭日图、桑基流向图、主题河流、雷达（模型质量五维）、平行坐标（会话多维）、箱线图（速度分布）、K 线（每日速度区间）、直方图（输入长度分布）、费用预算仪表盘
 - **自定义公式**：卡片支持安全表达式（Pratt 解析器，禁 eval）——`pct(cacheReadTok, cacheReadTok + inTok)`、`perSec(decodeTok, decodeMs)`，序列函数 `ma(x,n)` 移动平均、`delta(x)` 环比
 - **AI 编排**：描述需求 → 生成带指标目录与 JSON Schema 的提示词 → 交给任意 agent 会话 → 返回 JSON 一键导入，宿主按 Schema + 指标白名单双校验，坏配置进不来
 - **入口可选**：默认左侧栏 Global panels 最上方（完整主面板形态）；⚙ 设置里可切换为设置页内 / 两者都显示
@@ -47,9 +48,10 @@ dsh plugin --profile web add @weibaohui/dsh-dashboard -w
 2. **编辑布局**：进入编辑模式拖拽/缩放卡片、加卡片、新建页/改名/删页，改动自动保存
 3. **下钻**：热力图点某一天、模型榜点某个模型、会话表点某一行、洞察条目点击——逐级从总览定位到单个会话
 4. **AI 编排**：设置 → AI 编排新页面 → 描述需求生成提示词 → 交给任意 dsh agent 会话 → 把返回 JSON 粘回导入
-5. **费用**：默认按内置价格表估算；设置 → 编辑价格表按模型调整单价（每 M token，含缓存读写）；未定价模型费用记 0 并在表中列出
+5. **费用**：默认按内置价格表估算；设置 → 编辑价格表按模型调整单价（每 M token，含缓存读写）；⚙ 设置里可设月预算，Token 与费用页的预算仪表盘实时显示达成率
 6. **扫描**：启动自动增量扫描（按文件 mtime 跳过）；设置里可手动增量重扫 / 全量重扫
 7. **自定义公式**：卡片编辑器填公式（优先于指标），支持 `pct(a,b)`、`perSec(tokens,ms)`、序列级 `ma(x,n)`、`delta(x)`
+8. **输入与时长分析**：输入次数/字符量趋势、平均输入长度、会话运行时长排行、子代理调用量
 
 ## 页面 → 板块
 
@@ -61,6 +63,7 @@ dsh plugin --profile web add @weibaohui/dsh-dashboard -w
 | 命令与技能 | shell 命令榜 · skill 调用榜 · 工具调用榜 · 斜杠命令榜 |
 | 工作时段与会话 | 星期 × 小时热力图 · 最近会话表 · 回合与错误趋势 · 项目榜 |
 | 错误分析 | 专项洞察 · 错误趋势 · 供应商 × 错误码 · 错误样本与聚簇 · 工具报错榜 |
+| 输入与时长 | 输入次数/运行时长统计卡 · 输入趋势 · 平均输入长度 · 直方图 · 会话明细 |
 
 ## 卡片配置 schema（页面 JSON）
 
@@ -72,8 +75,9 @@ dsh plugin --profile web add @weibaohui/dsh-dashboard -w
   layout: [{ i: 'ov-today-cost', x: 0, y: 0, w: 3, h: 2 }, …],
   cards: {
     'ov-today-cost': {
-      type: 'stat',              // stat|line|bar|pie|table|calendarHeatmap|
-                                 // punchcard|sessions|errorSamples|retryCodes|insights
+      type: 'stat',              // stat|line|bar|pie|table|calendarHeatmap|punchcard|sessions
+                                 // errorSamples|retryCodes|insights|stack|treemap|sunburst
+                                 // sankey|themeRiver|radar|parallel|boxplot|candle|histogram|gauge
       title: '今日估算费用',
       query: {
         measures: ['cost'],      // 指标名（见 /api/catalog 指标目录）
@@ -186,7 +190,8 @@ link 安装的实例改完源码：host 改动重启 `dsh web`，client 改动 `
 
 | 插件版本 | 适配 dsh 版本 | 备注 |
 |---------|--------------|------|
-| 0.1.0 | 0.1.7-rc.2 | 当前版本，已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
+| 0.1.1 | 0.1.7-rc.2 | 新增输入/时长/子代理统计与 11 种新图类（堆叠柱/树图/桑基/河流/雷达/平行坐标/箱线/K线/直方/仪表），当前验证版本 |
+| 0.1.0 | 0.1.7-rc.2 | 首个版本 |
 
 > **发版约定**：每次发布新版本时，请在上表追加一行，记录该插件版本实际验证所用的 `@deepseek-ai/dsh` 版本。`package.json` 的 `engines.dsh` 声明最低支持版本；本表记录实际验证版本，二者配合使用。
 

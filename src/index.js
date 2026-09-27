@@ -451,7 +451,7 @@ module.exports = {
       return presets.defaultPages()
     }
 
-    const DEFAULT_CONFIG = { entry: 'sidebar' } // sidebar | settings | both
+    const DEFAULT_CONFIG = { entry: 'sidebar', budgetMonth: 0 } // 入口位置 + 月预算（USD，0=未设）
 
     async function currentConfig() {
       try {
@@ -460,6 +460,16 @@ module.exports = {
         if (stored && typeof stored === 'object') return { ...DEFAULT_CONFIG, ...stored }
       } catch { /* ignore */ }
       return { ...DEFAULT_CONFIG }
+    }
+
+    async function speedDistData(qp) {
+      const range = resolveRange(qp.get('range') || '30')
+      return fold.speedDist(listFacts(), {
+        scope: qp.get('scope') === 'top' ? 'top' : 'all',
+        project: qp.get('project') || '',
+        from: qp.get('from') || range.from,
+        to: qp.get('to') || range.to,
+      })
     }
 
     const listFacts = (q) => [...factsById.values()]
@@ -664,6 +674,34 @@ module.exports = {
                 return
               }
             }
+            if (req.method === 'GET' && path.endsWith('/flows')) {
+              const range = resolveRange(qp.get('range') || '30')
+              const pricing = await currentPricing()
+              sendJson(200, fold.flowsOf(listFacts(), {
+                scope: qp.get('scope') === 'top' ? 'top' : 'all',
+                project: qp.get('project') || '',
+                measure: qp.get('measure') === 'cost' ? 'cost' : 'outTok',
+                from: qp.get('from') || range.from,
+                to: qp.get('to') || range.to,
+                pricing,
+              }, pricing))
+              return
+            }
+            if (req.method === 'GET' && path.endsWith('/dist')) {
+              sendJson(200, await speedDistData(qp))
+              return
+            }
+            if (req.method === 'GET' && path.endsWith('/month')) {
+              // 本月（自然月）费用 + 预算：gauge 卡数据
+              const today = todayStr()
+              const monthStart = today.slice(0, 7) + '-01'
+              const pricing = await currentPricing()
+              const rows = fold.aggregate(listFacts(), { granularity: 'day', from: monthStart, to: today, groupBy: '', scope: qp.get('scope') === 'top' ? 'top' : 'all', pricing }).rows
+              const cost = Math.round(rows.reduce((s, r) => s + (r.values.cost || 0), 0) * 1000) / 1000
+              const cfg = await currentConfig()
+              sendJson(200, { monthStart, cost, budgetMonth: Number(cfg.budgetMonth) || 0 })
+              return
+            }
 
             // ── 入口/界面配置 ─────────────────────────────────────────────
             if (req.method === 'GET' && path.endsWith('/config')) {
@@ -674,6 +712,7 @@ module.exports = {
               const body = JSON.parse((await readBody(req, 4096)) || '{}')
               const cfg = { ...(await currentConfig()) }
               if (body.entry === 'sidebar' || body.entry === 'settings' || body.entry === 'both') cfg.entry = body.entry
+              if (typeof body.budgetMonth === 'number' && Number.isFinite(body.budgetMonth) && body.budgetMonth >= 0) cfg.budgetMonth = body.budgetMonth
               try {
                 const table = await storeTable('config')
                 await table.put('ui', cfg)
