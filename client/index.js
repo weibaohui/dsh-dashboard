@@ -74,7 +74,20 @@ const CSS = `
 .dshd-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dshd-card-body { flex:1; min-height:0; position:relative; }
 .dshd-chart { position:absolute; inset:0; }
-.dshd-card.editing .dshd-card-head { cursor:grab; background:rgba(37,99,235,0.10); }
+.dshd-card.editing .dshd-card-head { cursor:move; background:rgba(37,99,235,0.10); }
+/* gridstack 缩放手柄：8 向定位 + 方向光标（仅编辑模式可见可抓） */
+.dshd-grid:not(.grid-editing) .ui-resizable-handle { display:none !important; }
+.grid-stack-item .ui-resizable-handle { position:absolute; z-index:40; display:block; touch-action:none; }
+.grid-stack-item .ui-resizable-n  { top:-3px; left:8px; right:8px; height:6px; cursor:ns-resize; }
+.grid-stack-item .ui-resizable-s  { bottom:-3px; left:8px; right:8px; height:6px; cursor:ns-resize; }
+.grid-stack-item .ui-resizable-e  { right:-3px; top:8px; bottom:8px; width:6px; cursor:ew-resize; }
+.grid-stack-item .ui-resizable-w  { left:-3px; top:8px; bottom:8px; width:6px; cursor:ew-resize; }
+.grid-stack-item .ui-resizable-ne { top:-3px; right:-3px; width:14px; height:14px; cursor:nesw-resize; }
+.grid-stack-item .ui-resizable-sw { bottom:-3px; left:-3px; width:14px; height:14px; cursor:nesw-resize; }
+.grid-stack-item .ui-resizable-nw { top:-3px; left:-3px; width:14px; height:14px; cursor:nwse-resize; }
+.grid-stack-item .ui-resizable-se { bottom:-3px; right:-3px; width:14px; height:14px; cursor:nwse-resize; }
+.dshd-grid.grid-editing .grid-stack-item .ui-resizable-handle { background:rgba(37,99,235,0.22); }
+.dshd-grid.grid-editing .grid-stack-item .ui-resizable-handle:hover { background:rgba(37,99,235,0.5); }
 /* 悬停显示「编辑 / 复制」；✕ 删除仅编辑模式 */
 .dshd-card-edit, .dshd-card-copy { color:#2563eb; cursor:pointer; padding:0 4px; border-radius:4px; display:none; font-weight:400; flex:none; }
 .dshd-card-edit:hover, .dshd-card-copy:hover { background:rgba(37,99,235,0.12); }
@@ -1145,6 +1158,7 @@ function GridCanvas({ page, editing, theme, onLayoutChange, renderCard }) {
       float: true,
       disableOneColumnMode: true,
       draggable: { handle: '.dshd-card-head' },
+      resizable: { handles: 'e, se, s, sw, w, n, ne, nw' },
       staticGrid: !editing,
     }, containerRef.current)
     gridRef.current = grid
@@ -1171,8 +1185,8 @@ function GridCanvas({ page, editing, theme, onLayoutChange, renderCard }) {
 
   return React.createElement('div', {
     ref: containerRef,
-    className: 'grid-stack dshd-grid',
-    style: { column: undefined },
+    className: 'grid-stack dshd-grid' + (editing ? ' grid-editing' : ''),
+
   }, page.layout.map((it) => {
     const card = page.cards[it.i]
     if (!card) return null
@@ -1548,7 +1562,7 @@ function DashboardPanel({ variant }) {
       }, p.title)),
       React.createElement('span', { style: { flex: 1 } }),
       React.createElement('span', { className: 'dshd-scan' }, scanLabel),
-      React.createElement('button', { className: 'dshd-btn' + (editing ? ' on' : ''), onClick: () => setEditing(!editing) }, editing ? '完成编排' : '编辑布局'),
+      React.createElement('button', { className: 'dshd-btn' + (editing ? ' on' : ''), onClick: () => { if (editing) persistPages(pages); setEditing(!editing) } }, editing ? '保存布局' : '编辑布局'),
       !editing && React.createElement('button', { className: 'dshd-btn', onClick: addCard }, '加卡片'),
       editing && React.createElement('button', { className: 'dshd-btn', onClick: addPage }, '新建页'),
       editing && React.createElement('button', { className: 'dshd-btn', onClick: renamePage }, '改名'),
@@ -1559,6 +1573,8 @@ function DashboardPanel({ variant }) {
         onClick: () => setPop((v) => !v),
       }, '设置'),
     ),
+    editing && React.createElement('div', { className: 'dshd-muted', style: { marginBottom: 8 } },
+      '布局编辑中：拖动卡片标题移动位置（十字箭头）· 鼠标放到卡片边框/四角出现缩放光标可调整大小 · 完成 → 保存布局'),
     err && React.createElement('div', { className: 'dshd-err', style: { marginBottom: 8 } }, err),
     status && status.scanErrors && status.scanErrors.length > 0 && React.createElement('div', { className: 'dshd-muted', style: { marginBottom: 6 } },
       '扫描跳过：' + status.scanErrors.join('；')),
