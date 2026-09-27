@@ -63,13 +63,17 @@ const CSS = `
 .grid-stack-item-content { width:100%; height:100%; overflow:hidden; }
 .dshd-card { display:flex; flex-direction:column; height:100%; background:var(--dshd-card,#fff); border:1px solid var(--dshd-border2,rgba(90,100,110,0.55)); border-radius:8px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.08); }
 .dshd-card-head { display:flex; align-items:center; gap:6px; padding:6px 10px; font-weight:600; font-size:12px; cursor:default; border-bottom:1px solid var(--dshd-border,#d0d7de); background:var(--dshd-card2,rgba(127,127,127,0.04)); }
+.dshd-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dshd-card-body { flex:1; min-height:0; position:relative; }
 .dshd-chart { position:absolute; inset:0; }
 .dshd-card.editing .dshd-card-head { cursor:grab; background:rgba(37,99,235,0.10); }
-.dshd-card-del { margin-left:auto; color:#cf222e; cursor:pointer; font-weight:700; padding:0 4px; display:none; }
+/* 悬停显示「编辑 / 复制」；✕ 删除仅编辑模式 */
+.dshd-card-edit, .dshd-card-copy { color:#2563eb; cursor:pointer; padding:0 4px; border-radius:4px; display:none; font-weight:400; flex:none; }
+.dshd-card-edit:hover, .dshd-card-copy:hover { background:rgba(37,99,235,0.12); }
+.dshd-card:hover .dshd-card-edit, .dshd-card:hover .dshd-card-copy { display:inline; }
+.dshd-card-copy.done { color:#16a34a; }
+.dshd-card-del { color:#cf222e; cursor:pointer; font-weight:700; padding:0 4px; display:none; flex:none; }
 .dshd-card.editing .dshd-card-del { display:inline; }
-.dshd-card-edit { margin-left:auto; color:#2563eb; cursor:pointer; padding:0 4px; display:none; }
-.dshd-card.editing .dshd-card-edit { display:inline; margin-left:0; }
 .grid-stack-placeholder > .placeholder-content { background:rgba(37,99,235,0.12); border:2px dashed #2563eb; border-radius:8px; }
 .grid-stack-item-removing { opacity:0.4; }
 .dshd-stat { display:flex; flex-direction:column; justify-content:center; padding:2px 12px; height:100%; }
@@ -700,6 +704,7 @@ function DrillBody({ drill, data, theme }) {
 // ── CardView：按类型取数渲染 ────────────────────────────────────────────────
 function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
   const [state, setState] = React.useState({ loading: true, error: '', data: null })
+  const [copied, setCopied] = React.useState(false)
   const reloadTick = React.useRef(0)
   React.useEffect(() => {
     let alive = true
@@ -709,6 +714,15 @@ function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
       .catch((e) => { if (alive) setState({ loading: false, error: String((e && e.message) || e), data: null }) })
     return () => { alive = false }
   }, [JSON.stringify(card.query), card.type, reloadTick.current])
+  // 复制当前卡片的定义信息（type/title/query/options JSON）到剪贴板
+  const copyDef = () => {
+    try {
+      navigator.clipboard.writeText(JSON.stringify(card, null, 2)).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }).catch(() => {})
+    } catch { /* 剪贴板不可用 */ }
+  }
 
   let body = null
   if (state.loading) body = React.createElement('div', { style: { padding: 12, opacity: 0.6, fontSize: 12 } }, '加载中…')
@@ -718,10 +732,10 @@ function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
     switch (card.type) {
       case 'stat': body = React.createElement(StatBody, { card, data: d, theme }); break
       case 'line': body = React.createElement(LineBody, { card, cube: d, theme }); break
-      case 'bar': body = React.createElement(BarBody, { card, cube: d, theme }); break
+      case 'bar': body = React.createElement(BarBody, { card, cube: d, theme, onDrill }); break
       case 'pie': body = React.createElement(PieBody, { card, cube: d, theme }); break
       case 'table': body = React.createElement(TableBody, { card, cube: d }); break
-      case 'calendarHeatmap': body = React.createElement(CalendarBody, { card, cube: d, theme }); break
+      case 'calendarHeatmap': body = React.createElement(CalendarBody, { card, cube: d, theme, onDrill }); break
       case 'punchcard': body = React.createElement(PunchBody, { card, data: d, theme }); break
       case 'sessions': body = React.createElement(SessionsBody, { card, data: d, onDrill }); break
       case 'errorSamples': body = React.createElement(ErrorSamplesBody, { card, data: d }); break
@@ -732,8 +746,13 @@ function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
   }
   return React.createElement('div', { className: 'dshd-card' + (editing ? ' editing' : '') },
     React.createElement('div', { className: 'dshd-card-head' },
-      React.createElement('span', null, card.title || card.type),
-      React.createElement('span', { className: 'dshd-card-edit', title: '编辑卡片', onClick: onEdit }, '✎'),
+      React.createElement('span', { className: 'dshd-title', title: card.title || card.type }, card.title || card.type),
+      React.createElement('span', { className: 'dshd-card-edit', title: '编辑卡片定义', onClick: onEdit }, '编辑'),
+      React.createElement('span', {
+        className: 'dshd-card-copy' + (copied ? ' done' : ''),
+        title: '复制卡片定义 JSON',
+        onClick: copyDef,
+      }, copied ? '已复制' : '复制'),
       React.createElement('span', { className: 'dshd-card-del', title: '删除卡片', onClick: onDelete }, '✕'),
     ),
     React.createElement('div', { className: 'dshd-card-body' }, body),
