@@ -83,6 +83,7 @@ const CSS = `
 .dshd-table { width:100%; border-collapse:collapse; font-size:12px; }
 .dshd-table th,.dshd-table td { text-align:right; padding:3px 8px; border-bottom:1px solid var(--dshd-border,#d0d7de); white-space:nowrap; }
 .dshd-table th:first-child,.dshd-table td:first-child { text-align:left; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+.dshd-ellip { max-width:130px; overflow:hidden; text-overflow:ellipsis; }
 .dshd-table thead th { position:sticky; top:0; background:var(--dshd-card,#fff); }
 .dshd-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:10000; display:flex; align-items:center; justify-content:center; }
 .dshd-modal { background:var(--dshd-card,#fff); color:var(--dshd-text,#24292f); border-radius:10px; padding:16px; width:min(720px,92vw); max-height:86vh; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
@@ -545,7 +546,7 @@ function SessionsBody({ card, data, onDrill }) {
           onClick: () => typeof onDrill === 'function' && onDrill({ kind: 'session', key: r.sessionId }),
         },
           React.createElement('td', { title: (r.title || r.sessionId) }, (r.title || r.sessionId).slice(0, 28)),
-          React.createElement('td', null, r.project || '-'),
+          React.createElement('td', { className: 'dshd-ellip', title: r.project || '-' }, (r.project || '-').slice(0, 24)),
           React.createElement('td', null, r.userMsgs),
           React.createElement('td', null, r.turns + (r.turnsError ? `（败${r.turnsError}）` : '')),
           React.createElement('td', null, fmtNum(r.totalTok)),
@@ -664,7 +665,7 @@ function DrillBody({ drill, data, theme }) {
         React.createElement('thead', null, React.createElement('tr', null, ['会话', '项目', '回合', 'tokens', '费用'].map((h) => React.createElement('th', { key: h }, h)))),
         React.createElement('tbody', null, d.sessions.map((s) => React.createElement('tr', { key: s.sessionId, title: s.title || s.sessionId },
           React.createElement('td', null, (s.title || s.sessionId).slice(0, 34)),
-          React.createElement('td', null, s.project || '-'),
+          React.createElement('td', { className: 'dshd-ellip', title: s.project || '-' }, (s.project || '-').slice(0, 24)),
           React.createElement('td', null, s.turns + (s.turnsError ? `（败${s.turnsError}）` : '')),
           React.createElement('td', null, fmtNum(s.totalTok)),
           React.createElement('td', null, fmtMoney(s.cost)))))),
@@ -693,7 +694,7 @@ function DrillBody({ drill, data, theme }) {
         React.createElement('thead', null, React.createElement('tr', null, ['会话', '项目', '输出 tokens', '条数'].map((h) => React.createElement('th', { key: h }, h)))),
         React.createElement('tbody', null, (d.topSessions || []).map((s) => React.createElement('tr', { key: s.sessionId },
           React.createElement('td', null, (s.title || s.sessionId).slice(0, 36)),
-          React.createElement('td', null, s.project || '-'),
+          React.createElement('td', { className: 'dshd-ellip', title: s.project || '-' }, (s.project || '-').slice(0, 24)),
           React.createElement('td', null, fmtNum(s.outTok)),
           React.createElement('td', null, s.msgs))))),
     )
