@@ -23,6 +23,8 @@ function sampleEvents(baseTime) {
     ev('tool/result', d(3) + 1200, { turn: 1, step: 1, message: { isError: true, source: { kind: 'tool', callId: 'call-2' }, content: [{ type: 'text', text: 'curl: (7) Failed to connect' }] } }),
     ev('tool/call', d(4), { turn: 1, step: 1, callId: 'call-3', name: 'skill', arguments: '{"name":"pdf-scan-to-markdown"}' }),
     ev('tool/result', d(4) + 300, { turn: 1, step: 1, message: { isError: false, source: { kind: 'tool', callId: 'call-3' }, content: [] } }),
+    ev('tool/call', d(4), { turn: 1, step: 1, callId: 'call-4', name: 'subagent', arguments: '{"agent":" researcher"}' }),
+    ev('tool/result', d(4) + 300, { turn: 1, step: 1, message: { isError: false, source: { kind: 'tool', callId: 'call-3' }, content: [] } }),
     {
       ...ev('assistant/message', d(5), {
         turn: 1, step: 1,
@@ -76,9 +78,12 @@ test('foldSession：token/模型/工具/命令/技能/质量全链路', () => {
   const day = fact.days[date]
   assert.ok(day, '当天日桶存在')
   assert.equal(day.userMsgs, 1)
+  assert.equal(day.userInputChars, 2) // '你好'
   assert.equal(day.turns, 2)
   assert.equal(day.turnsCompleted, 1)
   assert.equal(day.turnsError, 1)
+  assert.equal(day.subagents, 1)
+  assert.ok(day.activeMs > 0)
   assert.equal(day.inTok, 1000)
   assert.equal(day.outTok, 200)
   assert.equal(day.cacheReadTok, 300)
@@ -92,8 +97,8 @@ test('foldSession：token/模型/工具/命令/技能/质量全链路', () => {
   assert.equal(day.decodeTok, 200)
   assert.equal(day.decodeMs, 2000)
   assert.equal(day.speedSamples, 1)
-  // 工具配对：bash ok 500ms、bash err 1200ms、skill 300ms
-  assert.equal(day.toolCalls, 3)
+  // 工具配对：bash ok 500ms、bash err 1200ms、skill 300ms、subagent 无结果
+  assert.equal(day.toolCalls, 4)
   assert.equal(day.toolErrors, 1)
   assert.equal(day.byTool.bash.calls, 2)
   assert.equal(day.byTool.bash.errs, 1)
@@ -225,7 +230,7 @@ test('errorBreakdown：错误分类与聚簇聚合', () => {
   assert.equal(eb.trend[0].kinds.TOOL, 1)
 })
 
-test('insights：异常日 / 慢工具 / 会话排行', () => {
+test('insights：异常日 / 慢工具 / 会话排行 / 输入与时长', () => {
   const base = new Date('2026-09-20T09:00:00').getTime()
   const fact = fold.foldSession('session-x', sampleEvents(base))
   const ins = fold.insights([fact], {}, { 'glm-5.2': { in: 1, out: 2, cr: 0, cw: 0 } })
@@ -233,6 +238,12 @@ test('insights：异常日 / 慢工具 / 会话排行', () => {
   assert.ok(Array.isArray(ins.topCostSessions))
   assert.ok(Array.isArray(ins.slowTools))
   assert.ok(Array.isArray(ins.errorClusters))
+  assert.ok(Array.isArray(ins.topInputSessions))
+  assert.ok(Array.isArray(ins.longestSessions))
+  const s = fold.summary([fact], {}, 'all')
+  assert.equal(typeof s.all.userInputChars, 'number')
+  assert.equal(typeof s.all.activeMin, 'number')
+  assert.equal(typeof s.all.subagents, 'number')
 })
 
 test('dayDetail / modelDetail / sessionDetail', () => {

@@ -133,6 +133,9 @@ function emptyDay() {
     turnsMaxTokens: 0,
     turnsUser: 0,
     userMsgs: 0,
+    userInputChars: 0,
+    activeMs: 0,
+    subagents: 0,
     retries: 0,
     compactions: 0,
     slashCmds: 0,
@@ -246,6 +249,18 @@ function firstText(content) {
   return ''
 }
 
+/** 统计 message.content 全部 text 块的字符总数（用户输入长度用）。 */
+function messageTextLength(content) {
+  if (!Array.isArray(content)) return 0
+  let n = 0
+  for (const b of content) {
+    if (!b || typeof b !== 'object') continue
+    if (typeof b.text === 'string') n += b.text.length
+    if (Array.isArray(b.content)) n += messageTextLength(b.content)
+  }
+  return n
+}
+
 /**
  * 单会话事件流 fold。
  * @param {string} sessionId
@@ -302,6 +317,10 @@ function foldSession(sessionId, events) {
     switch (type) {
       case 'user/message': {
         day.userMsgs += 1
+        // 真实输入在 data.content；兼容 data.message.content 形态
+        const ucontent = (Array.isArray(data.content) && data.content) ||
+          (data.message && Array.isArray(data.message.content) ? data.message.content : null)
+        day.userInputChars += messageTextLength(ucontent)
         break
       }
       case 'turn/start': {
@@ -399,6 +418,7 @@ function foldSession(sessionId, events) {
       case 'tool/call': {
         const name = typeof data.name === 'string' && data.name ? data.name : 'unknown'
         day.toolCalls += 1
+        if (name === 'subagent') day.subagents += 1
         const te = toolEntry(day.byTool, name)
         te.calls += 1
         if (typeof data.callId === 'string') openCalls.set(data.callId, { time, name, cmd: '' })
@@ -461,6 +481,10 @@ function foldSession(sessionId, events) {
   }
 
   if (!headerSeen && !haveData) return null
+  // 每日运行时长：该会话当天首末事件跨度（收尾统一折算，事件流已排序）
+  for (const day of Object.values(fact.days)) {
+    if (day.firstAt && day.lastAt && day.lastAt > day.firstAt) day.activeMs = day.lastAt - day.firstAt
+  }
   // 清理空日（只有 heat 全 0 且无计数的 Day 不该出现，保险起见不过滤，聚合时跳过全零）
   return fact
 }
@@ -479,7 +503,12 @@ const MEASURES = Object.freeze({
   turnsCompleted: '完成回合',
   turnsError: '出错回合',
   turnsAborted: '中止回合',
-  userMsgs: '用户消息数',
+  userMsgs: '用户输入次数',
+  userInputChars: '用户输入字符数',
+  inputAvg: '平均输入长度（字符/条）',
+  activeMs: '运行时长 ms（日内首末事件跨度）',
+  activeMin: '运行时长分钟（activeMs/60000）',
+  subagents: '子代理调用次数',
   retries: 'LLM 重试次数',
   retryExhausted: '重试耗尽次数',
   retryDelayMs: '重试等待总 ms',
@@ -509,6 +538,8 @@ function deriveMeasure(key, acc) {
     case 'speed': return acc.decodeMs > 0 ? (acc.decodeTok / acc.decodeMs) * 1000 : 0
     case 'cost': return acc._cost
     case 'errorRate': return acc.turns > 0 ? (acc.turnsError / acc.turns) * 100 : 0
+    case 'inputAvg': return acc.userMsgs > 0 ? Math.round((acc.userInputChars / acc.userMsgs) * 10) / 10 : 0
+    case 'activeMin': return Math.round((acc.activeMs / 60000) * 10) / 10
     default: {
       const v = acc[key]
       return typeof v === 'number' ? v : 0
@@ -520,7 +551,7 @@ function emptyAcc() {
   return {
     msgs: 0, msgsNoUsage: 0, inTok: 0, outTok: 0, cacheReadTok: 0, cacheWriteTok: 0,
     turns: 0, turnsCompleted: 0, turnsError: 0, turnsAborted: 0, turnsInterrupted: 0, turnsMaxTokens: 0, turnsUser: 0,
-    userMsgs: 0, retries: 0, retryDelayMs: 0, retryExhausted: 0, compactions: 0, slashCmds: 0,
+    userMsgs: 0, userInputChars: 0, activeMs: 0, subagents: 0, retries: 0, retryDelayMs: 0, retryExhausted: 0, compactions: 0, slashCmds: 0,
     toolCalls: 0, toolErrors: 0, toolMs: 0, llmMs: 0, decodeMs: 0, decodeTok: 0, speedSamples: 0,
     _sessions: 0, _skills: 0, _cmds: 0, _cost: 0,
     firstAt: 0, lastAt: 0,
@@ -531,7 +562,7 @@ function addNums(acc, day, fields) {
   for (const f of fields) acc[f] += day[f] || 0
 }
 
-const SUM_FIELDS = ['msgs', 'msgsNoUsage', 'inTok', 'outTok', 'cacheReadTok', 'cacheWriteTok', 'turns', 'turnsCompleted', 'turnsError', 'turnsAborted', 'turnsInterrupted', 'turnsMaxTokens', 'turnsUser', 'userMsgs', 'retries', 'retryDelayMs', 'retryExhausted', 'compactions', 'slashCmds', 'toolCalls', 'toolErrors', 'toolMs', 'llmMs', 'decodeMs', 'decodeTok']
+const SUM_FIELDS = ['msgs', 'msgsNoUsage', 'inTok', 'outTok', 'cacheReadTok', 'cacheWriteTok', 'turns', 'turnsCompleted', 'turnsError', 'turnsAborted', 'turnsInterrupted', 'turnsMaxTokens', 'turnsUser', 'userMsgs', 'userInputChars', 'activeMs', 'subagents', 'retries', 'retryDelayMs', 'retryExhausted', 'compactions', 'slashCmds', 'toolCalls', 'toolErrors', 'toolMs', 'llmMs', 'decodeMs', 'decodeTok']
 
 /** 模型价格（每 M token）；未收录模型回退 0。 */
 function modelCost(byModel, pricing) {
@@ -717,11 +748,16 @@ function sessionRows(facts, q) {
       days,
       turns: acc.turns,
       turnsError: acc.turnsError,
+      userMsgs: acc.userMsgs,
+      inputChars: acc.userInputChars,
       inTok: acc.inTok,
       outTok: acc.outTok,
       totalTok: deriveMeasure('totalTok', acc),
       cost: Math.round(deriveMeasure('cost', acc) * 1000) / 1000,
       speed: Math.round(deriveMeasure('speed', acc) * 10) / 10,
+      durationMin: (acc.lastAt && acc.firstAt && acc.lastAt > acc.firstAt) ? Math.round((acc.lastAt - acc.firstAt) / 60000) : 0,
+      activeMin: Math.round(deriveMeasure('activeMin', acc) * 10) / 10,
+      subagents: acc.subagents,
       retries: acc.retries,
       toolCalls: acc.toolCalls,
       toolErrors: acc.toolErrors,
@@ -788,9 +824,11 @@ function summary(facts, pricing, scope) {
       inTok: acc.inTok, outTok: acc.outTok, cacheReadTok: acc.cacheReadTok, cacheWriteTok: acc.cacheWriteTok,
       totalTok: deriveMeasure('totalTok', acc),
       turns: acc.turns, turnsError: acc.turnsError,
+      userMsgs: acc.userMsgs, userInputChars: acc.userInputChars, inputAvg: deriveMeasure('inputAvg', acc),
+      activeMin: deriveMeasure('activeMin', acc), subagents: acc.subagents,
       retries: acc.retries, retryExhausted: acc.retryExhausted, compactions: acc.compactions,
       toolCalls: acc.toolCalls, toolErrors: acc.toolErrors,
-      userMsgs: acc.userMsgs, sessions: acc._sessions,
+      sessions: acc._sessions,
       cost: Math.round(acc._cost * 1000) / 1000,
       speed: Math.round(deriveMeasure('speed', acc) * 10) / 10,
     }
@@ -1074,6 +1112,8 @@ function insights(facts, q, pricing) {
       addNums(sAcc, day, SUM_FIELDS)
       sAcc._cost += modelCost(day.byModel, pricing)
       sAcc._compactions = (sAcc._compactions || 0) + (day.compactions || 0)
+      if (day.firstAt && (!sAcc.firstAt || day.firstAt < sAcc.firstAt)) sAcc.firstAt = day.firstAt
+      if (day.lastAt && day.lastAt > sAcc.lastAt) sAcc.lastAt = day.lastAt
       for (const e of (fact.modelErrors || []).slice(-40)) {
         const key = errorClusterKey(e.msg)
         clusters.set(key, (clusters.get(key) || 0) + 1)
@@ -1093,13 +1133,21 @@ function insights(facts, q, pricing) {
   const medTok = median(days.map((d) => d.totalTok).filter((v) => v > 0))
   const sessions = [...sessionAgg.entries()].map(([id, a]) => {
     const f = facts.find((x) => x.sessionId === id) || {}
-    return { sessionId: id, project: f.project || '', title: f.title || '', turns: a.turns, turnsError: a.turnsError, outTok: a.outTok, cost: Math.round(a._cost * 1000) / 1000, compactions: a._compactions || 0, retries: a.retries }
+    return {
+      sessionId: id, project: f.project || '', title: f.title || '',
+      turns: a.turns, turnsError: a.turnsError, outTok: a.outTok,
+      userMsgs: a.userMsgs, inputChars: a.userInputChars,
+      cost: Math.round(a._cost * 1000) / 1000, compactions: a._compactions || 0, retries: a.retries,
+      durationMin: (a.lastAt && a.firstAt && a.lastAt > a.firstAt) ? Math.round((a.lastAt - a.firstAt) / 60000) : 0,
+    }
   })
   return {
     worstErrorDays: activeDays.filter((d) => d.errorRate > 0).sort((a, b) => b.errorRate - a.errorRate).slice(0, 5),
     tokenSpikeDays: days.filter((d) => d.totalTok > 0 && medTok > 0).sort((a, b) => b.totalTok - a.totalTok).slice(0, 5).map((d) => ({ ...d, vsMedian: Math.round((d.totalTok / medTok) * 10) / 10 })),
     topCostSessions: sessions.filter((s) => s.cost > 0).sort((a, b) => b.cost - a.cost).slice(0, 8),
     mostErrorSessions: sessions.filter((s) => s.turnsError > 0).sort((a, b) => b.turnsError - a.turnsError).slice(0, 8),
+    topInputSessions: sessions.filter((s) => s.userMsgs > 0).sort((a, b) => b.userMsgs - a.userMsgs).slice(0, 8),
+    longestSessions: sessions.filter((s) => s.durationMin > 0).sort((a, b) => b.durationMin - a.durationMin).slice(0, 8),
     retryTopProviders: [...providerRetry.entries()].map(([provider, v]) => ({ provider, retries: v.retries, codes: v.codes })).sort((a, b) => b.retries - a.retries).slice(0, 6),
     slowTools: [...toolAgg.entries()].filter(([, t]) => t.calls >= 10).map(([tool, t]) => ({ tool, calls: t.calls, avgMs: Math.round(t.ms / t.calls), errs: t.errs })).sort((a, b) => b.avgMs - a.avgMs).slice(0, 8),
     cmdFailRate: [...cmdAgg.entries()].filter(([, c]) => c.calls >= 5 && c.errs > 0).map(([cmd, c]) => ({ cmd, calls: c.calls, errs: c.errs, failRate: Math.round((c.errs / c.calls) * 1000) / 10 })).sort((a, b) => b.failRate - a.failRate).slice(0, 8),

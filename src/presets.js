@@ -63,7 +63,7 @@ const DEFAULT_PRICING = {
 /** 布局小工具：生成 gridstack 的 {x,y,w,h}。 */
 const cell = (x, y, w, h) => ({ x, y, w, h })
 
-/** 六个出厂页。卡片 id 稳定，用户改布局后仍是同一份 JSON 的 patch。 */
+/** 七个出厂页。卡片 id 稳定，用户改布局后仍是同一份 JSON 的 patch。 */
 function defaultPages() {
   return [
     {
@@ -174,6 +174,29 @@ function defaultPages() {
         'e-codes': { type: 'retryCodes', title: '供应商 × 错误码（30 天）', query: { range: '30', scope: 'all' }, options: {} },
         'e-samples': { type: 'errorSamples', title: '错误样本与聚簇（30 天）', query: { range: '30', scope: 'all' }, options: {} },
         'e-tools': { type: 'bar', title: '工具报错榜（30 天）', query: { measures: ['toolErrors'], range: '30', granularity: 'day', groupBy: 'tool', scope: 'all' }, options: { top: 10 } },
+      },
+    },
+    {
+      id: 'input',
+      title: '输入与时长',
+      cols: 12,
+      layout: [
+        { i: 'i-in-today', ...cell(0, 0, 3, 2) },
+        { i: 'i-in-all', ...cell(3, 0, 3, 2) },
+        { i: 'i-dur-today', ...cell(6, 0, 3, 2) },
+        { i: 'i-dur-all', ...cell(9, 0, 3, 2) },
+        { i: 'i-in-trend', ...cell(0, 2, 6, 6) },
+        { i: 'i-len-trend', ...cell(6, 2, 6, 6) },
+        { i: 'i-sess', ...cell(0, 8, 12, 7) },
+      ],
+      cards: {
+        'i-in-today': { type: 'stat', title: '今日输入次数', query: { measures: ['userMsgs'], range: 'today', granularity: 'day', scope: 'all' }, options: { unit: '次' } },
+        'i-in-all': { type: 'stat', title: '累计输入次数', query: { measures: ['userMsgs'], range: 'all', granularity: 'day', scope: 'all' }, options: { unit: '次' } },
+        'i-dur-today': { type: 'stat', title: '今日运行时长', query: { measures: ['activeMin'], range: 'today', granularity: 'day', scope: 'all' }, options: { unit: '分钟' } },
+        'i-dur-all': { type: 'stat', title: '累计运行时长', query: { measures: ['activeMin'], range: 'all', granularity: 'day', scope: 'all' }, options: { unit: '分钟' } },
+        'i-in-trend': { type: 'line', title: '每日输入次数与字符量（30 天）', query: { measures: ['userMsgs', 'userInputChars'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'i-len-trend': { type: 'line', title: '平均输入长度（30 天，字符/条）', query: { formula: 'userInputChars / userMsgs', range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'i-sess': { type: 'sessions', title: '会话明细（输入 / 运行时长 / 费用）', query: { range: '30', scope: 'all' }, options: {} },
       },
     },
   ]

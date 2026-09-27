@@ -157,13 +157,26 @@ function fmtMoney(v) {
   if (Math.abs(v) >= 1) return '$' + v.toFixed(2)
   return '$' + v.toFixed(4)
 }
+function fmtDuration(min) {
+  if (typeof min !== 'number' || !Number.isFinite(min) || min <= 0) return '-'
+  if (min >= 2880) return (min / 1440).toFixed(1) + ' 天'
+  const h = Math.floor(min / 60)
+  const m = Math.round(min % 60)
+  if (h > 0) return h + ' 小时' + (m ? m + ' 分' : '')
+  return m + ' 分钟'
+}
 function fmtMeasure(measure, v) {
   if (measure === 'cost') return fmtMoney(v)
   if (measure === 'speed') return fmtNum(v) + ' tok/s'
   if (measure === 'errorRate') return v.toFixed(1) + '%'
+  if (measure === 'userMsgs') return fmtNum(v) + ' 次'
+  if (measure === 'userInputChars') return fmtNum(v) + ' 字'
+  if (measure === 'inputAvg') return fmtNum(v) + ' 字/条'
+  if (measure === 'activeMin') return fmtDuration(v)
+  if (measure === 'subagents') return fmtNum(v) + ' 次'
   return fmtNum(v)
 }
-const MEASURE_UNITS = { cost: 'USD', speed: 'tok/s', errorRate: '%' }
+const MEASURE_UNITS = { cost: 'USD', speed: 'tok/s', errorRate: '%', userMsgs: '次', userInputChars: '字', inputAvg: '字/条', activeMin: '分钟', subagents: '次' }
 
 // ── 卡片数据获取（带 60s 缓存，重挂载不重新打后端）───────────────────────────
 const dataCache = new Map()
@@ -523,7 +536,7 @@ function SessionsBody({ card, data, onDrill }) {
   return React.createElement('div', { className: 'dshd-tablewrap' },
     React.createElement('table', { className: 'dshd-table' },
       React.createElement('thead', null, React.createElement('tr', null,
-        ['会话', '项目', '回合', 'tokens', '费用', '速度'].map((h) => React.createElement('th', { key: h }, h)))),
+        ['会话', '项目', '输入', '回合', 'tokens', '时长', '费用'].map((h) => React.createElement('th', { key: h }, h)))),
       React.createElement('tbody', null,
         rows.slice(0, 40).map((r) => React.createElement('tr', {
           key: r.sessionId,
@@ -533,10 +546,11 @@ function SessionsBody({ card, data, onDrill }) {
         },
           React.createElement('td', { title: (r.title || r.sessionId) }, (r.title || r.sessionId).slice(0, 28)),
           React.createElement('td', null, r.project || '-'),
-          React.createElement('td', null, r.turns),
+          React.createElement('td', null, r.userMsgs),
+          React.createElement('td', null, r.turns + (r.turnsError ? `（败${r.turnsError}）` : '')),
           React.createElement('td', null, fmtNum(r.totalTok)),
-          React.createElement('td', null, fmtMoney(r.cost)),
-          React.createElement('td', null, r.speed ? fmtNum(r.speed) : '-'))))))
+          React.createElement('td', null, fmtDuration(r.durationMin)),
+          React.createElement('td', null, fmtMoney(r.cost)))))))
 }
 
 // ── 错误专项卡片 ─────────────────────────────────────────────────────────────
@@ -605,6 +619,8 @@ function InsightsBody({ card, data, onDrill }) {
   return React.createElement('div', { className: 'dshd-tablewrap', style: { padding: '8px 10px', overflow: 'auto' } },
     section('异常日（回合错误率最高）', ins.worstErrorDays, (d) => item(`${d.date} · ${d.turns} 回合`, `${d.errorRate}% 失败`, () => onDrill({ kind: 'day', key: d.date }))),
     section('Token 异常日（相对中位数）', ins.tokenSpikeDays, (d) => item(`${d.date} · ${d.sessions} 会话`, `${fmtNum(d.totalTok)}（×${d.vsMedian}）`, () => onDrill({ kind: 'day', key: d.date }))),
+    section('输入最多会话', ins.topInputSessions, (s) => item(s.title || s.sessionId, s.userMsgs + ' 次', () => onDrill({ kind: 'session', key: s.sessionId }))),
+    section('运行最长会话', ins.longestSessions, (s) => item(s.title || s.sessionId, fmtDuration(s.durationMin), () => onDrill({ kind: 'session', key: s.sessionId }))),
     section('最贵会话', ins.topCostSessions, (s) => item(s.title || s.sessionId, fmtMoney(s.cost), () => onDrill({ kind: 'session', key: s.sessionId }))),
     section('错误最多会话', ins.mostErrorSessions, (s) => item(s.title || s.sessionId, `${s.turnsError} 次失败`, () => onDrill({ kind: 'session', key: s.sessionId }))),
     section('重试风暴（按供应商）', ins.retryTopProviders, (p) => item(p.provider, `${p.retries} 次`)),
