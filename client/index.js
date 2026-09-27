@@ -650,7 +650,7 @@ function DrillModal({ drill, onClose }) {
   else if (state.data && state.data.__error) body = React.createElement('div', { className: 'dshd-err' }, state.data.__error)
   else body = React.createElement(DrillBody, { key: drill.kind + ':' + drill.key, drill, data: state.data, theme })
   const titles = { day: '当日明细', model: '模型详情', session: '会话详情' }
-  return React.createElement(Modal, { title: (titles[drill.kind] || '详情') + ' · ' + (drill.key || ''), onClose, wide }, body)
+  return React.createElement(Modal, { title: (titles[drill.kind] || '详情') + ' · ' + (drill.key || ''), onClose, wide: true }, body)
 }
 
 function DrillBody({ drill, data, theme }) {
@@ -709,7 +709,7 @@ function DrillBody({ drill, data, theme }) {
     ...Object.entries(d.models || {}).map(([m, v]) => statChip(m, `${v.msgs} 条 / ${fmtNum(v.outTok)} out`)),
     React.createElement('div', { className: 'dshd-muted', style: { margin: '8px 0 4px' } }, '工具调用'),
     React.createElement('div', null, Object.entries(d.tools || {}).sort((a, b) => b[1].calls - a[1].calls).slice(0, 12).map(([t, v]) =>
-      stat(t, `${v.calls}${v.errs ? '（错' + v.errs + '）' : ''}`))),
+      statChip(t, `${v.calls}${v.errs ? '（错' + v.errs + '）' : ''}`))),
     (d.errors || []).length > 0 && React.createElement('div', { style: { marginTop: 10 } },
       React.createElement('div', { className: 'dshd-muted' }, '错误样本'),
       d.errors.slice(-8).map((e, i) => React.createElement('div', { key: i, style: { fontSize: 11 } },
@@ -1307,6 +1307,7 @@ function cardIdOf(page, card) {
 // 面板内「入口」下拉可在线切换，slots 的 subscribe 机制支持动态重注册。
 
 const ENTRY_STATE = { entry: 'sidebar', listeners: [] }
+const SLOT_ID = 'dsh-dashboard'
 function setEntry(entry) {
   ENTRY_STATE.entry = entry
   for (const fn of ENTRY_STATE.listeners.slice()) {
@@ -1333,16 +1334,17 @@ module.exports = {
     function registerSidebar() {
       if (registered.sidebar) return
       registered.sidebar = true
-      // 侧边栏入口：panellist 提供（排序 + 图标），main 提供面板内容
+      // 侧边栏入口：panellist 提供（排序 + 图标），main 提供面板内容。
+      // id/key 用简单串（不含 @/），keyed slot 的匹配对特殊字符不稳。
       disposers.push(slots.inject('sidebar.panellist', () => slots.register(
-        { name: 'sidebar.panellist', id: PLUGIN_ID, label: '仪表盘', order: -100 },
+        { name: 'sidebar.panellist', id: SLOT_ID, label: '仪表盘', order: -100 },
         (props) => React.createElement('span', {
           'aria-hidden': 'true',
           style: { display: 'inline-flex', width: (props && props.size) || 18, height: (props && props.size) || 18, alignItems: 'center', justifyContent: 'center', fontSize: ((props && props.size) || 18) - 4 },
         }, '📊'),
       )))
       disposers.push(slots.inject('main', () => slots.register(
-        { name: 'main', key: PLUGIN_ID },
+        { name: 'main', key: SLOT_ID },
         () => React.createElement(DashboardPanel, { variant: 'panel' }),
       )))
     }

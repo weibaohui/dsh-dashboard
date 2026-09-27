@@ -6,6 +6,19 @@
 
 **使用量仪表盘**：离线扫描本机全部 dsh 会话日志，把每天/每周/每月的 token 用量、估算费用、模型/工具/技能/命令榜、输出速度、工作时段与质量错误做成可编排的 Dashboard——gridstack 拖拽卡片 + ECharts 图表 + GitHub 同款日历热力图，支持自定义公式、AI 编排整页配置，不监听任何运行时事件、全部统计在本地完成。
 
+## 效果演示
+
+![demo：七个预设页巡游 + 会话下钻（17s 循环）](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/demo.gif)
+
+| | | |
+|---|---|---|
+| ![概览](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/overview.png) | ![Token 与费用](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/cost.png) | ![模型与质量](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/quality.png) |
+| *概览：四统计卡 + 热力图 + 趋势 + 模型榜* | *Token 与费用：趋势/构成/命中率/明细* | *模型与质量：速度/错误率/明细/重试榜* |
+| ![命令与技能](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/tools.png) | ![工作时段与会话](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/work.png) | ![错误分析](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/errors.png) |
+| *命令与技能：四类调用榜* | *工作时段热力图 + 会话明细* | *专项洞察 + 错误码分类 + 聚簇* |
+| ![输入与时长](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/input.png) | ![会话下钻](https://cdn.jsdelivr.net/gh/weibaohui/dsh-dashboard@main/docs/shots/drill.png) | |
+| *输入与时长：次数/长度/运行时长* | *会话下钻：单会话完整画像* | |
+
 ## 核心功能
 
 - **六个出厂预设页**：概览（四统计卡 + 52 周热力图 + token 趋势 + 模型榜）、Token 与费用、模型与质量、命令与技能、工作时段与会话、错误分析——装上即有完整 Dashboard
