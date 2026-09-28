@@ -43,34 +43,64 @@ const SLOT_ORDER = 36
 
 // ── 样式注入（gridstack 必需子集 + 卡片外观）────────────────────────────────
 const CSS = `
+/* 主题变量：默认亮色，.dshd-dark 整套覆盖（暗色值随 JS 探测结果挂类切换） */
+.dshd-wrap {
+  --dshd-text: #1f2328;
+  --dshd-card: #ffffff;
+  --dshd-solid: #ffffff;          /* 弹层/输入框/粘性表头用实色（暗色下半透明卡片会透字） */
+  --dshd-card2: rgba(127,127,127,0.05);
+  --dshd-border: #d0d7de;
+  --dshd-border2: rgba(90,110,130,0.45);
+  --dshd-accent: #2563eb;
+  --dshd-ok: #1a7f37;
+  --dshd-danger: #cf222e;
+  --dshd-overlay: rgba(0,0,0,0.35);
+  --dshd-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  --dshd-pop-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+.dshd-wrap.dshd-dark {
+  --dshd-text: #e6edf3;
+  --dshd-card: rgba(255,255,255,0.045);
+  --dshd-solid: #161b22;
+  --dshd-card2: rgba(255,255,255,0.07);
+  --dshd-border: rgba(255,255,255,0.14);
+  --dshd-border2: rgba(240,246,252,0.18);
+  --dshd-accent: #4493f8;
+  --dshd-ok: #3fb950;
+  --dshd-danger: #f85149;
+  --dshd-overlay: rgba(0,0,0,0.55);
+  --dshd-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  --dshd-pop-shadow: 0 8px 30px rgba(0,0,0,0.6);
+}
 .dshd-wrap, .dshd-wrap * { box-sizing: border-box; }
-.dshd-wrap { font: 13px/1.5 -apple-system, "PingFang SC", "Segoe UI", sans-serif; color: var(--dshd-text, #24292f); padding: 12px 16px 16px; box-sizing: border-box; overflow-y: auto; position: relative; }
+.dshd-wrap { font: 13px/1.5 -apple-system, "PingFang SC", "Segoe UI", sans-serif; color: var(--dshd-text); padding: 12px 16px 16px; box-sizing: border-box; overflow-y: auto; position: relative; }
 /* 主面板模式下由 JS 钉高（视口高 − 顶部偏移），使 wrap 自身成为滚动容器 */
 .dshd-pop-bg { position: fixed; inset: 0; z-index: 9990; }
-.dshd-pop { position: absolute; top: 46px; right: 16px; z-index: 9995; background: var(--dshd-card,#fff); color: var(--dshd-text,#24292f); border: 1px solid var(--dshd-border2,rgba(90,100,110,0.55)); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.2); padding: 10px 10px 6px; width: 320px; }
+.dshd-pop { position: absolute; top: 46px; right: 16px; z-index: 9995; background: var(--dshd-solid); color: var(--dshd-text); border: 1px solid var(--dshd-border2); border-radius: 10px; box-shadow: var(--dshd-pop-shadow); padding: 10px 10px 6px; width: 320px; }
 .dshd-sec-t { font-size: 11px; opacity: 0.55; margin: 10px 2px 4px; }
 .dshd-sec-t:first-of-type { margin-top: 2px; }
 .dshd-mi { display: block; width: 100%; text-align: left; background: transparent; border: none; border-radius: 8px; padding: 7px 8px; cursor: pointer; color: inherit; font: inherit; }
 .dshd-mi:hover { background: rgba(127,127,127,0.14); }
 .dshd-mi-t { display: block; font-weight: 600; font-size: 13px; }
 .dshd-mi-d { display: block; font-size: 11px; opacity: 0.6; margin-top: 1px; }
-.dshd-pop-foot { border-top: 1px solid var(--dshd-border,#d0d7de); margin-top: 8px; padding-top: 8px; font-size: 11px; opacity: 0.6; display: flex; justify-content: space-between; gap: 8px; }
+.dshd-pop-foot { border-top: 1px solid var(--dshd-border); margin-top: 8px; padding-top: 8px; font-size: 11px; opacity: 0.6; display: flex; justify-content: space-between; gap: 8px; }
 .dshd-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
-.dshd-tab { padding:4px 12px; border:1px solid var(--dshd-border,#d0d7de); border-radius:6px; cursor:pointer; background:var(--dshd-card,#fff); user-select:none; }
-.dshd-tab.active { background:#2563eb; border-color:#2563eb; color:#fff; }
-.dshd-btn { padding:4px 10px; border:1px solid var(--dshd-border,#d0d7de); border-radius:6px; cursor:pointer; background:var(--dshd-card,#fff); }
-.dshd-btn:hover { filter:brightness(0.97); }
-.dshd-btn.primary { background:#2563eb; border-color:#2563eb; color:#fff; }
-.dshd-btn.danger { color:#cf222e; border-color:#cf222e; }
-.dshd-btn.on { background:#16a34a; border-color:#16a34a; color:#fff; }
+.dshd-tab { padding:4px 12px; border:1px solid var(--dshd-border); border-radius:6px; cursor:pointer; background:var(--dshd-card); color:var(--dshd-text); user-select:none; }
+.dshd-tab.active { background:var(--dshd-accent); border-color:var(--dshd-accent); color:#fff; }
+.dshd-btn { padding:4px 10px; border:1px solid var(--dshd-border); border-radius:6px; cursor:pointer; background:var(--dshd-card); color:var(--dshd-text); }
+.dshd-btn:hover { filter:brightness(0.95); }
+.dshd-dark .dshd-btn:hover { filter:brightness(1.3); }
+.dshd-btn.primary { background:var(--dshd-accent); border-color:var(--dshd-accent); color:#fff; }
+.dshd-btn.danger { color:var(--dshd-danger); border-color:var(--dshd-danger); }
+.dshd-btn.on { background:var(--dshd-ok); border-color:var(--dshd-ok); color:#fff; }
 .dshd-scan { font-size:12px; opacity:0.75; }
 .dshd-grid { position:relative; min-height:420px; /* gridstack 内联高度不含底部 margin，留出呼吸空间避免末行边框被裁 */ padding-bottom: 14px; box-sizing: content-box; }
 /* gridstack 官方 CSS 的必需子集：item 绝对定位 + 消费容器上的间距变量
    （v12 把 margin 放进 --gs-item-margin-* 变量，样式表不消费则卡片互相贴死） */
 .grid-stack-item { position:absolute; top:0; left:0; padding: var(--gs-item-margin-top,3px) var(--gs-item-margin-right,3px) var(--gs-item-margin-bottom,3px) var(--gs-item-margin-left,3px); }
 .grid-stack-item-content { width:100%; height:100%; overflow:hidden; }
-.dshd-card { display:flex; flex-direction:column; height:100%; background:var(--dshd-card,#fff); border:1px solid var(--dshd-border2,rgba(90,100,110,0.55)); border-radius:8px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.08); }
-.dshd-card-head { display:flex; align-items:center; gap:6px; padding:6px 10px; font-weight:600; font-size:12px; cursor:default; border-bottom:1px solid var(--dshd-border,#d0d7de); background:var(--dshd-card2,rgba(127,127,127,0.04)); }
+.dshd-card { display:flex; flex-direction:column; height:100%; background:var(--dshd-card); border:1px solid var(--dshd-border2); border-radius:8px; overflow:hidden; box-shadow:var(--dshd-shadow); }
+.dshd-card-head { display:flex; align-items:center; gap:6px; padding:6px 10px; font-weight:600; font-size:12px; cursor:default; border-bottom:1px solid var(--dshd-border); background:var(--dshd-card2); }
 .dshd-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dshd-card-body { flex:1; min-height:0; position:relative; }
 .dshd-chart { position:absolute; inset:0; }
@@ -89,31 +119,32 @@ const CSS = `
 .dshd-grid.grid-editing .grid-stack-item .ui-resizable-handle { background:rgba(37,99,235,0.22); }
 .dshd-grid.grid-editing .grid-stack-item .ui-resizable-handle:hover { background:rgba(37,99,235,0.5); }
 /* 悬停显示「编辑 / 复制」；✕ 删除仅编辑模式 */
-.dshd-card-edit, .dshd-card-copy { color:#2563eb; cursor:pointer; padding:0 4px; border-radius:4px; display:none; font-weight:400; flex:none; }
-.dshd-card-edit:hover, .dshd-card-copy:hover { background:rgba(37,99,235,0.12); }
+.dshd-card-edit, .dshd-card-copy { color:var(--dshd-accent); cursor:pointer; padding:0 4px; border-radius:4px; display:none; font-weight:400; flex:none; }
+.dshd-card-edit:hover, .dshd-card-copy:hover { background:rgba(127,127,127,0.18); }
 .dshd-card:hover .dshd-card-edit, .dshd-card:hover .dshd-card-copy { display:inline; }
-.dshd-card-copy.done { color:#16a34a; }
-.dshd-card-del { color:#cf222e; cursor:pointer; font-weight:700; padding:0 4px; display:none; flex:none; }
+.dshd-card-copy.done { color:var(--dshd-ok); }
+.dshd-card-del { color:var(--dshd-danger); cursor:pointer; font-weight:700; padding:0 4px; display:none; flex:none; }
 .dshd-card.editing .dshd-card-del { display:inline; }
-.grid-stack-placeholder > .placeholder-content { background:rgba(37,99,235,0.12); border:2px dashed #2563eb; border-radius:8px; }
+.grid-stack-placeholder > .placeholder-content { background:rgba(37,99,235,0.12); border:2px dashed var(--dshd-accent); border-radius:8px; }
 .grid-stack-item-removing { opacity:0.4; }
 .dshd-stat { display:flex; flex-direction:column; justify-content:center; padding:2px 12px; height:100%; }
 .dshd-stat-v { font-size:20px; font-weight:700; letter-spacing:-0.5px; line-height:1.25; }
 .dshd-stat-u { font-size:10px; opacity:0.65; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .dshd-tablewrap { position:absolute; inset:0; overflow:auto; }
 .dshd-table { width:100%; border-collapse:collapse; font-size:12px; }
-.dshd-table th,.dshd-table td { text-align:right; padding:3px 8px; border-bottom:1px solid var(--dshd-border,#d0d7de); white-space:nowrap; }
+.dshd-table th,.dshd-table td { text-align:right; padding:3px 8px; border-bottom:1px solid var(--dshd-border); white-space:nowrap; }
 .dshd-table th:first-child,.dshd-table td:first-child { text-align:left; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
 .dshd-ellip { max-width:130px; overflow:hidden; text-overflow:ellipsis; }
-.dshd-table thead th { position:sticky; top:0; background:var(--dshd-card,#fff); }
-.dshd-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:10000; display:flex; align-items:center; justify-content:center; }
-.dshd-modal { background:var(--dshd-card,#fff); color:var(--dshd-text,#24292f); border-radius:10px; padding:16px; width:min(720px,92vw); max-height:86vh; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+.dshd-table thead th { position:sticky; top:0; background:var(--dshd-solid); }
+.dshd-modal-bg { position:fixed; inset:0; background:var(--dshd-overlay); z-index:10000; display:flex; align-items:center; justify-content:center; }
+.dshd-modal { background:var(--dshd-solid); color:var(--dshd-text); border:1px solid var(--dshd-border2); border-radius:10px; padding:16px; width:min(720px,92vw); max-height:86vh; overflow:auto; box-shadow:var(--dshd-pop-shadow); }
 .dshd-modal h3 { margin:0 0 10px; font-size:15px; }
 .dshd-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
 .dshd-row label { font-size:12px; opacity:0.8; }
-.dshd-input, .dshd-select, .dshd-textarea { border:1px solid var(--dshd-border,#d0d7de); border-radius:6px; padding:4px 8px; font:inherit; background:var(--dshd-card,#fff); color:inherit; }
+.dshd-input, .dshd-select, .dshd-textarea { border:1px solid var(--dshd-border); border-radius:6px; padding:4px 8px; font:inherit; background:var(--dshd-solid); color:var(--dshd-text); }
+.dshd-select option { background:var(--dshd-solid); color:var(--dshd-text); }
 .dshd-textarea { width:100%; min-height:140px; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
-.dshd-err { color:#cf222e; font-size:12px; white-space:pre-wrap; }
+.dshd-err { color:var(--dshd-danger); font-size:12px; white-space:pre-wrap; }
 .dshd-measures { display:flex; gap:4px 10px; flex-wrap:wrap; max-width:100%; }
 .dshd-measures label { font-size:12px; display:flex; gap:3px; align-items:center; }
 .dshd-muted { opacity:0.65; font-size:12px; }
@@ -127,29 +158,98 @@ function injectCss() {
   document.head.appendChild(el)
 }
 
-// ── 主题探测（跟随页面明暗）──────────────────────────────────────────────────
+// ── 主题：跟随 dsh 界面明暗，实时联动（无手动设置）───────────────────────────
 function luminance(color) {
   const m = /rgba?\(([^)]+)\)/.exec(color || '')
   if (!m) return 1
   const [r, g, b] = m[1].split(',').map((x) => parseFloat(x))
   return (0.299 * (r || 255) + 0.587 * (g || 255) + 0.114 * (b || 255)) / 255
 }
-function themeColors() {
-  const cs = typeof getComputedStyle === 'function' ? getComputedStyle(document.body) : null
-  const bg = (cs && cs.backgroundColor) || '#ffffff'
-  const text = (cs && cs.color) || '#24292f'
-  const dark = luminance(bg) < 0.5
+function bgLuminance(el) {
+  try {
+    const bg = getComputedStyle(el).backgroundColor
+    // 全透明（rgba(...,0)）视为「无信号」，由上层回退到别的判据
+    if (!bg || bg === 'transparent' || /rgba\(\s*[\d.]+,\s*[\d.]+,\s*[\d.]+,\s*0\s*\)/.test(bg)) return null
+    return luminance(bg)
+  } catch { return null }
+}
+/** 暗色判据优先级：官方主题属性（dsh ThemePresenter 约定）→ class → 底色亮度 → 系统偏好。
+ *  data-ds-dark-theme 挂在 body（存在即暗色）；data-ds-theme-source 挂在 html
+ *  （light/dark/system，system 时由真实底色或系统偏好决定）。 */
+function detectDark() {
+  if (typeof document === 'undefined') return false
+  const root = document.documentElement
+  const body = document.body
+  const source = (root.getAttribute('data-ds-theme-source') || '').toLowerCase()
+  if (source === 'dark') return true
+  if (source === 'light') return false
+  if (body && body.hasAttribute('data-ds-dark-theme')) return true
+  const attr = (root.getAttribute('data-theme') || '').toLowerCase()
+  if (attr === 'dark') return true
+  if (attr === 'light') return false
+  if (root.classList.contains('dark')) return true
+  if (root.classList.contains('light')) return false
+  if (body && body.classList.contains('dark')) return true
+  const lum = body ? bgLuminance(body) : null
+  const lum2 = lum === null ? bgLuminance(root) : lum
+  if (lum2 !== null) return lum2 < 0.5
+  try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) } catch { return false }
+}
+function themeColors(dark) {
+  dark = !!dark
   return {
     dark,
-    text,
-    sub: dark ? 'rgba(255,255,255,0.62)' : 'rgba(0,0,0,0.5)',
+    text: dark ? '#e6edf3' : '#1f2328',
+    sub: dark ? 'rgba(230,237,243,0.62)' : 'rgba(31,35,40,0.55)',
     border: dark ? 'rgba(255,255,255,0.14)' : '#d0d7de',
     card: dark ? 'rgba(255,255,255,0.045)' : '#ffffff',
-    axis: dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
-    split: dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-    tooltipBg: dark ? '#1f2328' : '#ffffff',
+    axis: dark ? 'rgba(255,255,255,0.35)' : 'rgba(31,35,40,0.35)',
+    split: dark ? 'rgba(255,255,255,0.1)' : 'rgba(31,35,40,0.09)',
+    tooltipBg: dark ? '#161b22' : '#ffffff',
+    accent: dark ? '#4493f8' : '#2563eb',
     palette: ['#5b8ff9', '#5ad8a6', '#f6bd16', '#e8684a', '#6dc8ec', '#9270ca', '#ff9d4d', '#269a99', '#ff99c3', '#a0d911', '#5d7092', '#f04864'],
   }
+}
+// 模块级主题总线：官方推荐的事件驱动换肤 —— dsh 切主题时翻动 html/body 上的
+// data-ds-dark-theme / data-ds-theme-source 属性，MutationObserver 即时捕获（零轮询延迟）；
+// matchMedia 兜住系统深浅；3s 低频轮询仅作最后兜底（第三方皮肤插件可能只改样式表
+// 不动属性，与 fireworks/matrix 的 3s 轮询同频，探针为单次 getComputedStyle，成本远低）。
+const themeBus = { started: false, listeners: new Set(), timer: 0, iv: 0, last: null }
+function watchTheme(cb) {
+  themeBus.listeners.add(cb)
+  if (!themeBus.started) {
+    themeBus.started = true
+    themeBus.last = detectDark()
+    const schedule = () => {
+      clearTimeout(themeBus.timer)
+      themeBus.timer = setTimeout(() => {
+        const dark = detectDark()
+        if (dark === themeBus.last) return
+        themeBus.last = dark
+        for (const fn of [...themeBus.listeners]) { try { fn(dark) } catch { /* 单个订阅者异常不拖垮其他 */ } }
+      }, 100)
+    }
+    try {
+      // 不做 attributeFilter：html/body 属性变化频率极低，全量监听可覆盖
+      // 官方属性、class、style 及未来版本/第三方皮肤引入的任何新信号
+      const mo = new MutationObserver(schedule)
+      mo.observe(document.documentElement, { attributes: true })
+      if (document.body) mo.observe(document.body, { attributes: true })
+    } catch { /* 极老环境无 MutationObserver：退化为轮询 */ }
+    try {
+      const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)')
+      if (mq && mq.addEventListener) mq.addEventListener('change', schedule)
+    } catch { /* ignore */ }
+    themeBus.iv = setInterval(schedule, 3000)
+  }
+  cb(detectDark())
+  return () => { themeBus.listeners.delete(cb) }
+}
+/** 主题 hook：挂载时探测一次，之后跟随界面变化驱动整棵树重渲染（图表 useMemo 依赖 theme）。 */
+function useTheme() {
+  const [dark, setDark] = React.useState(detectDark)
+  React.useEffect(() => watchTheme(setDark), [])
+  return React.useMemo(() => themeColors(dark), [dark])
 }
 
 // ── API 与格式化 ─────────────────────────────────────────────────────────────
@@ -619,7 +719,7 @@ function RetryCodesBody({ card, data }) {
             const total = Object.values(codesMap).reduce((x, y) => x + y, 0)
             return React.createElement('tr', { key: provider },
               React.createElement('td', { title: provider }, provider),
-              codes.map((c) => React.createElement('td', { key: c, style: (codesMap[c] || 0) > 0 && c === 'RATE_LIMIT' ? { color: '#cf222e', fontWeight: 600 } : null }, codesMap[c] || 0)),
+              codes.map((c) => React.createElement('td', { key: c, style: (codesMap[c] || 0) > 0 && c === 'RATE_LIMIT' ? { color: 'var(--dshd-danger)', fontWeight: 600 } : null }, codesMap[c] || 0)),
               React.createElement('td', null, React.createElement('b', null, total)))
           }))))
 }
@@ -629,7 +729,7 @@ function ErrorSamplesBody({ card, data }) {
   const samples = (eb.samples || []).slice(0, 30)
   const clusters = (eb.clusters || []).slice(0, 6)
   return React.createElement('div', { className: 'dshd-tablewrap' },
-    clusters.length > 0 && React.createElement('div', { style: { padding: '6px 10px', borderBottom: '1px solid var(--dshd-border,#d0d7de)' } },
+    clusters.length > 0 && React.createElement('div', { style: { padding: '6px 10px', borderBottom: '1px solid var(--dshd-border)' } },
       React.createElement('div', { className: 'dshd-muted', style: { marginBottom: 4 } }, '错误聚簇 Top（归一后计数）'),
       clusters.map((c) => React.createElement('div', { key: c.key, style: { fontSize: 11, display: 'flex', gap: 8 } },
         React.createElement('span', { style: { fontWeight: 700, flex: 'none' } }, '×' + c.n),
@@ -685,7 +785,7 @@ function DrillModal({ drill, onClose }) {
       .catch((e) => { if (alive) setState({ loading: false, data: { __error: String(e.message || e) } }) })
     return () => { alive = false }
   }, [drill.kind, drill.key])
-  const theme = themeColors()
+  const theme = useTheme()
   let body = null
   if (state.loading) body = React.createElement('div', { style: { padding: 12, opacity: 0.6 } }, '加载中…')
   else if (state.data && state.data.__error) body = React.createElement('div', { className: 'dshd-err' }, state.data.__error)
@@ -1415,7 +1515,7 @@ function DashboardPanel({ variant }) {
   React.useEffect(() => {
     window.__dshDashboardDrill = (d) => setModal({ kind: 'drill', drill: d })
   })
-  const [theme, setTheme] = React.useState(() => (typeof document !== 'undefined' ? themeColors() : {}))
+  const theme = useTheme()
   const saveTimer = React.useRef(null)
 
   const refreshAll = React.useCallback(() => {
@@ -1428,7 +1528,6 @@ function DashboardPanel({ variant }) {
 
   React.useEffect(() => {
     injectCss()
-    setTheme(themeColors())
     refreshAll()
     api('GET', '/catalog').then(setCatalog).catch(() => {})
     api('GET', '/projects').then((r) => setProjects(r.projects || [])).catch(() => {})
@@ -1542,7 +1641,7 @@ function DashboardPanel({ variant }) {
   }
 
   if (!pages || !catalog) {
-    return React.createElement('div', { className: 'dshd-wrap', ref: wrapRef },
+    return React.createElement('div', { className: 'dshd-wrap' + (theme.dark ? ' dshd-dark' : ''), ref: wrapRef },
       React.createElement('div', { style: { padding: 20, opacity: 0.6 } }, '仪表盘加载中…'),
       err && React.createElement('div', { className: 'dshd-err', style: { padding: '0 20px' } }, err))
   }
@@ -1553,7 +1652,7 @@ function DashboardPanel({ variant }) {
       : `${status.sessionCount} 会话 · ${new Date(status.lastScanAt || Date.now()).toLocaleTimeString()} 增量扫描完成`)
     : ''
 
-  return React.createElement('div', { className: 'dshd-wrap', ref: wrapRef },
+  return React.createElement('div', { className: 'dshd-wrap' + (theme.dark ? ' dshd-dark' : ''), ref: wrapRef },
     React.createElement('div', { className: 'dshd-head' },
       pages.map((p) => React.createElement('span', {
         key: p.id,

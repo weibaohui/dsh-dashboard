@@ -32,6 +32,7 @@
 - **自定义公式**：卡片支持安全表达式（Pratt 解析器，禁 eval）——`pct(cacheReadTok, cacheReadTok + inTok)`、`perSec(decodeTok, decodeMs)`，序列函数 `ma(x,n)` 移动平均、`delta(x)` 环比
 - **AI 编排**：描述需求 → 生成带指标目录与 JSON Schema 的提示词 → 交给任意 agent 会话 → 返回 JSON 一键导入，宿主按 Schema + 指标白名单双校验，坏配置进不来
 - **入口可选**：默认左侧栏 Global panels 最上方（完整主面板形态）；⚙ 设置里可切换为设置页内 / 两者都显示
+- **明暗主题跟随**：按官方约定读取 `body[data-ds-dark-theme]` / `html[data-ds-theme-source]` 主题属性，MutationObserver 属性监听即时跟随 dsh 切换主题（事件驱动零轮询，3s 低频探针仅兜底第三方皮肤），整套 UI 与全部图表实时重着色，无需刷新、无设置项
 - **性能自律**：多帧 zstd 逐帧解压（结构化扫帧，不用一次性解压 API 防静默截断）、mtime 增量扫描日常秒级、事实表内存缓存 + storage 持久化、零 npm 运行时依赖
 
 ## 安装
