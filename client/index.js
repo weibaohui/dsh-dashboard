@@ -210,11 +210,11 @@ function themeColors(dark) {
     palette: ['#5b8ff9', '#5ad8a6', '#f6bd16', '#e8684a', '#6dc8ec', '#9270ca', '#ff9d4d', '#269a99', '#ff99c3', '#a0d911', '#5d7092', '#f04864'],
   }
 }
-// 模块级主题总线：官方推荐的事件驱动换肤 —— dsh 切主题时翻动 html/body 上的
-// data-ds-dark-theme / data-ds-theme-source 属性，MutationObserver 即时捕获（零轮询延迟）；
-// matchMedia 兜住系统深浅；3s 低频轮询仅作最后兜底（第三方皮肤插件可能只改样式表
-// 不动属性，与 fireworks/matrix 的 3s 轮询同频，探针为单次 getComputedStyle，成本远低）。
-const themeBus = { started: false, listeners: new Set(), timer: 0, iv: 0, last: null }
+// 模块级主题总线：纯事件驱动，无轮询 —— dsh 切主题翻动 html/body 的
+// data-ds-dark-theme / data-ds-theme-source 属性，MutationObserver 即时捕获；
+// matchMedia 兜住系统深浅（source=system）；初次挂载同步探测一次。
+// body 被整体替换时组件树随之重挂载，会重新订阅并探测，自愈。
+const themeBus = { started: false, listeners: new Set(), timer: 0, last: null }
 function watchTheme(cb) {
   themeBus.listeners.add(cb)
   if (!themeBus.started) {
@@ -231,16 +231,15 @@ function watchTheme(cb) {
     }
     try {
       // 不做 attributeFilter：html/body 属性变化频率极低，全量监听可覆盖
-      // 官方属性、class、style 及未来版本/第三方皮肤引入的任何新信号
+      // 官方属性、class、style 及未来版本引入的任何新信号
       const mo = new MutationObserver(schedule)
       mo.observe(document.documentElement, { attributes: true })
       if (document.body) mo.observe(document.body, { attributes: true })
-    } catch { /* 极老环境无 MutationObserver：退化为轮询 */ }
+    } catch { /* 无 MutationObserver：仍有挂载时探测 + matchMedia */ }
     try {
       const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)')
       if (mq && mq.addEventListener) mq.addEventListener('change', schedule)
     } catch { /* ignore */ }
-    themeBus.iv = setInterval(schedule, 3000)
   }
   cb(detectDark())
   return () => { themeBus.listeners.delete(cb) }
