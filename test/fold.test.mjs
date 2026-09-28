@@ -244,6 +244,12 @@ test('insights：异常日 / 慢工具 / 会话排行 / 输入与时长', () => 
   assert.equal(typeof s.all.userInputChars, 'number')
   assert.equal(typeof s.all.activeMin, 'number')
   assert.equal(typeof s.all.subagents, 'number')
+  // medErrorRate：异常日条形参照线；errorClusters kind/lastAt：按类别着色 + 最近时间
+  assert.equal(typeof ins.medErrorRate, 'number')
+  ins.errorClusters.forEach((c) => {
+    assert.ok(c.kind)
+    assert.equal(typeof c.lastAt, 'number')
+  })
 })
 
 test('dayDetail / modelDetail / sessionDetail', () => {

@@ -1274,10 +1274,17 @@ function insights(facts, q, pricing) {
       sAcc._compactions = (sAcc._compactions || 0) + (day.compactions || 0)
       if (day.firstAt && (!sAcc.firstAt || day.firstAt < sAcc.firstAt)) sAcc.firstAt = day.firstAt
       if (day.lastAt && day.lastAt > sAcc.lastAt) sAcc.lastAt = day.lastAt
-      for (const e of (fact.modelErrors || []).slice(-40)) {
-        const key = errorClusterKey(e.msg)
-        clusters.set(key, (clusters.get(key) || 0) + 1)
-      }
+    }
+    // 错误聚簇按会话收一次（原在逐日循环里，多日活动会把同一条错误重复计天数遍）
+    for (const e of (fact.modelErrors || []).slice(-40)) {
+      const edate = localDate(e.time || 0)
+      if (q.from && edate < q.from) continue
+      if (q.to && edate > q.to) continue
+      const key = errorClusterKey(e.msg)
+      const cur = clusters.get(key) || { n: 0, kind: e.kind || 'OTHER', lastAt: 0 }
+      cur.n += 1
+      if ((e.time || 0) > cur.lastAt) cur.lastAt = e.time || 0
+      clusters.set(key, cur)
     }
   }
 
@@ -1291,6 +1298,7 @@ function insights(facts, q, pricing) {
   const activeDays = days.filter((d) => d.turns >= 3)
   const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
   const medTok = median(days.map((d) => d.totalTok).filter((v) => v > 0))
+  const medErrorRate = median(activeDays.map((d) => d.errorRate))
   const sessions = [...sessionAgg.entries()].map(([id, a]) => {
     const f = facts.find((x) => x.sessionId === id) || {}
     return {
@@ -1302,6 +1310,7 @@ function insights(facts, q, pricing) {
     }
   })
   return {
+    medErrorRate,
     worstErrorDays: activeDays.filter((d) => d.errorRate > 0).sort((a, b) => b.errorRate - a.errorRate).slice(0, 5),
     tokenSpikeDays: days.filter((d) => d.totalTok > 0 && medTok > 0).sort((a, b) => b.totalTok - a.totalTok).slice(0, 5).map((d) => ({ ...d, vsMedian: Math.round((d.totalTok / medTok) * 10) / 10 })),
     topCostSessions: sessions.filter((s) => s.cost > 0).sort((a, b) => b.cost - a.cost).slice(0, 8),
@@ -1312,7 +1321,7 @@ function insights(facts, q, pricing) {
     slowTools: [...toolAgg.entries()].filter(([, t]) => t.calls >= 10).map(([tool, t]) => ({ tool, calls: t.calls, avgMs: Math.round(t.ms / t.calls), errs: t.errs })).sort((a, b) => b.avgMs - a.avgMs).slice(0, 8),
     cmdFailRate: [...cmdAgg.entries()].filter(([, c]) => c.calls >= 5 && c.errs > 0).map(([cmd, c]) => ({ cmd, calls: c.calls, errs: c.errs, failRate: Math.round((c.errs / c.calls) * 1000) / 10 })).sort((a, b) => b.failRate - a.failRate).slice(0, 8),
     compactionHeavy: sessions.filter((s) => s.compactions > 0).sort((a, b) => b.compactions - a.compactions).slice(0, 5),
-    errorClusters: [...clusters.entries()].map(([key, n]) => ({ key, n })).sort((a, b) => b.n - a.n).slice(0, 8),
+    errorClusters: [...clusters.entries()].map(([key, v]) => ({ key, n: v.n, kind: v.kind, lastAt: v.lastAt })).sort((a, b) => b.n - a.n).slice(0, 8),
   }
 }
 

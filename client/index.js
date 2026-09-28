@@ -22,7 +22,7 @@ const {
 const {
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
   CalendarComponent, VisualMapComponent, DataZoomComponent,
-  ParallelComponent, SingleAxisComponent,
+  ParallelComponent, SingleAxisComponent, MarkLineComponent,
 } = require('echarts/components')
 const { CanvasRenderer } = require('echarts/renderers')
 const { GridStack } = require('gridstack')
@@ -34,7 +34,7 @@ echarts.use([
   RadarChart, ParallelChart, BoxplotChart, CandlestickChart, GaugeChart,
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
   CalendarComponent, VisualMapComponent, DataZoomComponent,
-  ParallelComponent, SingleAxisComponent, CanvasRenderer,
+  ParallelComponent, SingleAxisComponent, MarkLineComponent, CanvasRenderer,
 ])
 
 const API = '/dsh-dashboard/api'
@@ -339,7 +339,7 @@ async function loadCardData(card) {
   if (type === 'errorSamples' || type === 'retryCodes') {
     return loadErrors(q)
   }
-  if (type === 'insights') {
+  if (type === 'insights' || type.indexOf('insight') === 0) {
     return loadInsights(q)
   }
   if (type === 'boxplot' || type === 'candle') {
@@ -769,6 +769,207 @@ function InsightsBody({ card, data, onDrill }) {
     section('上下文压缩大户', ins.compactionHeavy, (s) => item(s.title || s.sessionId, `${s.compactions} 次`, () => onDrill({ kind: 'session', key: s.sessionId }))),
     section('错误聚簇 Top', ins.errorClusters, (c) => item(c.key, '×' + c.n)),
     React.createElement('div', { className: 'dshd-muted' }, '（空 = 区间内无此类信号）'),
+  )
+}
+
+// ── 专项洞察独立卡（每个专项一张卡，各用最合身的图型）───────────────────────
+const RETRY_CODES = ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'EMPTY_RESPONSE', 'TRANSPORT']
+const RETRY_CODE_COLORS = { RATE_LIMIT: '#e8684a', SERVER: '#f6bd16', TIMEOUT: '#6dc8ec', EMPTY_RESPONSE: '#9270ca', TRANSPORT: '#5d7092' }
+
+function insightEmpty(text) {
+  return React.createElement('div', { style: { padding: 12, opacity: 0.6, fontSize: 12 } }, text || '区间内暂无数据')
+}
+
+/** 横向条通用 option（类目在 y、值在 x，可选中位虚线参照）。 */
+function hbarOption(theme, cats, values, opt) {
+  return {
+    ...baseOption(theme),
+    legend: { show: false },
+    grid: { left: 8, right: opt.right || 56, top: 8, bottom: 4, containLabel: true },
+    tooltip: { ...baseOption(theme).tooltip, trigger: 'item' },
+    xAxis: { type: 'value', axisLabel: { color: theme.sub, fontSize: 10, formatter: opt.axisFmt || '{value}' }, splitLine: { lineStyle: { color: theme.split } } },
+    yAxis: { type: 'category', data: cats, inverse: true, axisLabel: { color: theme.text, fontSize: 10, width: 110, overflow: 'truncate' }, axisLine: { lineStyle: { color: theme.axis } }, axisTick: { show: false } },
+    series: [{
+      type: 'bar', data: values, barMaxWidth: 14,
+      itemStyle: { color: opt.color, borderRadius: [0, 3, 3, 0] },
+      label: { show: true, position: 'right', color: theme.sub, fontSize: 10, formatter: opt.label },
+      ...(opt.markLine ? {
+        markLine: {
+          silent: true, symbol: 'none',
+          lineStyle: { color: theme.axis, type: 'dashed' },
+          label: { color: theme.sub, fontSize: 9, formatter: opt.markLine.label },
+          data: [{ xAxis: opt.markLine.value }],
+        },
+      } : {}),
+    }],
+  }
+}
+
+/** 专项·异常日错误率（红系深浅按严重度，中位虚线参照，点条下钻当日）。 */
+function InsightErrorDaysBody({ data, theme, onDrill }) {
+  const rows = (data && data.worstErrorDays) || []
+  const med = (data && data.medErrorRate) || 0
+  const option = React.useMemo(() => (rows.length ? hbarOption(theme,
+    rows.map((r) => r.date), rows.map((r) => r.errorRate),
+    {
+      color: (p) => 'rgba(232,104,74,' + (0.35 + 0.65 * Math.min(1, p.value / 40)).toFixed(2) + ')',
+      label: (p) => p.value + '%',
+      axisFmt: '{value}%',
+      right: 64,
+      markLine: med > 0 ? { value: med, label: '中位 ' + med + '%' } : null,
+    }
+  ) : null), [rows, theme, med])
+  const ref = useECharts(option, (p) => { const r = rows[p.dataIndex]; if (r) onDrill({ kind: 'day', key: r.date }) })
+  if (option === null) return insightEmpty('区间内活跃日没有错误')
+  return React.createElement('div', { className: 'dshd-chart', ref })
+}
+
+/** 专项·Token 异常日（×中位数倍数条形，×1 基线，点条下钻当日）。 */
+function InsightTokenSpikesBody({ data, theme, onDrill }) {
+  const rows = (data && data.tokenSpikeDays) || []
+  const option = React.useMemo(() => (rows.length ? hbarOption(theme,
+    rows.map((r) => r.date), rows.map((r) => r.vsMedian),
+    {
+      color: (p) => 'rgba(246,189,22,' + (0.4 + 0.6 * Math.min(1, p.value / 10)).toFixed(2) + ')',
+      label: (p) => '×' + p.value + ' · ' + fmtNum(rows[p.dataIndex].totalTok),
+      markLine: { value: 1, label: '×1 中位' },
+    }
+  ) : null), [rows, theme])
+  const ref = useECharts(option, (p) => { const r = rows[p.dataIndex]; if (r) onDrill({ kind: 'day', key: r.date }) })
+  if (option === null) return insightEmpty('区间内没有 token 异常日')
+  return React.createElement('div', { className: 'dshd-chart', ref })
+}
+
+/** 专项·重试风暴（供应商 × 重试码堆叠条：一眼看出为什么重试）。 */
+function InsightRetriesBody({ data, theme }) {
+  const rows = (data && data.retryTopProviders) || []
+  const codes = React.useMemo(() => {
+    const totals = new Map()
+    rows.forEach((r) => Object.entries(r.codes || {}).forEach(([c, n]) => totals.set(c, (totals.get(c) || 0) + n)))
+    return [...totals.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([c]) => c)
+  }, [rows])
+  const option = React.useMemo(() => {
+    if (!rows.length) return null
+    return {
+      ...baseOption(theme),
+      legend: { ...baseOption(theme).legend, data: codes, bottom: 0 },
+      grid: { left: 8, right: 40, top: 8, bottom: 26, containLabel: true },
+      tooltip: { ...baseOption(theme).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
+      xAxis: { type: 'value', axisLabel: { color: theme.sub, fontSize: 10 }, splitLine: { lineStyle: { color: theme.split } } },
+      yAxis: { type: 'category', data: rows.map((r) => r.provider), inverse: true, axisLabel: { color: theme.text, fontSize: 10, width: 110, overflow: 'truncate' }, axisLine: { lineStyle: { color: theme.axis } } },
+      series: codes.map((c) => ({
+        name: c, type: 'bar', stack: 'retry', barMaxWidth: 14,
+        data: rows.map((r) => (r.codes && r.codes[c]) || 0),
+        itemStyle: { color: RETRY_CODE_COLORS[c] || theme.palette[3] },
+      })),
+    }
+  }, [rows, codes, theme])
+  const ref = useECharts(option)
+  if (option === null) return insightEmpty('区间内没有 LLM 重试')
+  return React.createElement('div', { className: 'dshd-chart', ref })
+}
+
+/** 专项·慢工具耗时榜（label 带调用次数）。 */
+function InsightSlowToolsBody({ data, theme }) {
+  const rows = (data && data.slowTools) || []
+  const fmtMs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms) + 'ms')
+  const option = React.useMemo(() => (rows.length ? hbarOption(theme,
+    rows.map((t) => t.tool), rows.map((t) => Math.round(t.avgMs / 100) / 10),
+    {
+      color: '#5b8ff9',
+      label: (p) => fmtMs(rows[p.dataIndex].avgMs) + ' · ' + rows[p.dataIndex].calls + ' 次',
+      axisFmt: '{value}s',
+    }
+  ) : null), [rows, theme])
+  const ref = useECharts(option)
+  if (option === null) return insightEmpty('调用 ≥10 次的工具里没有慢工具')
+  return React.createElement('div', { className: 'dshd-chart', ref })
+}
+
+/** 专项·命令失败率（绿→黄→红按严重度，label 带失败/总调用）。 */
+function InsightCmdFailBody({ data, theme }) {
+  const rows = (data && data.cmdFailRate) || []
+  const option = React.useMemo(() => (rows.length ? hbarOption(theme,
+    rows.map((c) => c.cmd), rows.map((c) => c.failRate),
+    {
+      color: (p) => (p.value < 10 ? '#5ad8a6' : p.value < 30 ? '#f6bd16' : '#e8684a'),
+      label: (p) => p.value + '%（' + rows[p.dataIndex].errs + '/' + rows[p.dataIndex].calls + '）',
+      axisFmt: '{value}%',
+      right: 84,
+    }
+  ) : null), [rows, theme])
+  const ref = useECharts(option)
+  if (option === null) return insightEmpty('区间内命令失败率（≥5 次调用）都为 0%')
+  return React.createElement('div', { className: 'dshd-chart', ref })
+}
+
+/** 专项·错误聚簇矩形树图（面积 ∝ 次数，按错误类别着色）。 */
+function InsightErrorClustersBody({ data, theme }) {
+  const rows = (data && data.errorClusters) || []
+  const kinds = React.useMemo(() => [...new Set(rows.map((r) => r.kind || 'OTHER'))], [rows])
+  const option = React.useMemo(() => {
+    if (!rows.length) return null
+    return {
+      ...baseOption(theme),
+      tooltip: { ...baseOption(theme).tooltip, trigger: 'item', formatter: (p) => (p.data && p.data.kind ? kindLabel(p.data.kind) + '<br/>' : '') + String(p.name || '').slice(0, 90) + '<br/>×' + p.value },
+      series: [{
+        type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false },
+        left: 4, right: 4, top: 4, bottom: 4,
+        itemStyle: { borderColor: theme.dark ? 'rgba(0,0,0,0.45)' : '#ffffff', borderWidth: 1, gapWidth: 1 },
+        label: { color: '#fff', fontSize: 10, overflow: 'truncate', width: 90 },
+        data: rows.map((r) => ({
+          name: r.key, value: r.n, kind: r.kind || 'OTHER',
+          itemStyle: { color: theme.palette[Math.max(0, kinds.indexOf(r.kind || 'OTHER')) % theme.palette.length] },
+        })),
+      }],
+    }
+  }, [rows, kinds, theme])
+  const ref = useECharts(option)
+  if (option === null) return insightEmpty('区间内没有模型错误')
+  return React.createElement('div', { className: 'dshd-chart', ref })
+}
+
+/** 专项·会话榜单合并表（费用/失败/输入/时长/压缩五榜合一，点表头排序，点行下钻会话）。 */
+function InsightSessionsBody({ data, onDrill }) {
+  const rows = React.useMemo(() => {
+    const d = data || {}
+    const map = new Map()
+    const put = (arr, fill) => (arr || []).forEach((s) => {
+      if (!s || !s.sessionId) return
+      const cur = map.get(s.sessionId) || { sessionId: s.sessionId, project: s.project || '', title: s.title || '', cost: 0, turnsError: 0, userMsgs: 0, durationMin: 0, compactions: 0 }
+      fill(cur, s)
+      map.set(s.sessionId, cur)
+    })
+    put(d.topCostSessions, (c, s) => { c.cost = s.cost })
+    put(d.mostErrorSessions, (c, s) => { c.turnsError = s.turnsError })
+    put(d.topInputSessions, (c, s) => { c.userMsgs = s.userMsgs })
+    put(d.longestSessions, (c, s) => { c.durationMin = s.durationMin })
+    put(d.compactionHeavy, (c, s) => { c.compactions = s.compactions })
+    return [...map.values()]
+  }, [data])
+  const [sort, setSort] = React.useState({ key: 'cost', dir: -1 })
+  const cols = [
+    { k: 'title', t: '会话' },
+    { k: 'cost', t: '费用', fmt: fmtMoney },
+    { k: 'turnsError', t: '失败', fmt: (v) => fmtNum(v) },
+    { k: 'userMsgs', t: '输入', fmt: (v) => fmtNum(v) + ' 次' },
+    { k: 'durationMin', t: '时长', fmt: fmtDuration },
+    { k: 'compactions', t: '压缩', fmt: (v) => fmtNum(v) },
+  ]
+  const sorted = React.useMemo(() => [...rows].sort((a, b) => {
+    if (sort.key === 'title') return String(a.title).localeCompare(String(b.title)) * sort.dir
+    return ((a[sort.key] || 0) - (b[sort.key] || 0)) * sort.dir
+  }), [rows, sort])
+  if (!rows.length) return insightEmpty('区间内没有会话上榜')
+  return React.createElement('div', { className: 'dshd-tablewrap' },
+    React.createElement('table', { className: 'dshd-table' },
+      React.createElement('thead', null, React.createElement('tr', null, cols.map((c) =>
+        React.createElement('th', { key: c.k, style: { cursor: 'pointer' }, title: '点击排序', onClick: () => setSort((s) => (s.key === c.k ? { key: c.k, dir: -s.dir } : { key: c.k, dir: -1 })) },
+          c.t + (sort.key === c.k ? (sort.dir < 0 ? ' ↓' : ' ↑') : ''))))),
+      React.createElement('tbody', null, sorted.map((r) =>
+        React.createElement('tr', { key: r.sessionId, style: { cursor: 'pointer' }, onClick: () => onDrill && onDrill({ kind: 'session', key: r.sessionId }), title: r.title || r.sessionId },
+          React.createElement('td', { className: 'dshd-ellip', style: { maxWidth: 160 } }, r.title || r.sessionId),
+          cols.slice(1).map((c) => React.createElement('td', { key: c.k }, c.fmt(r[c.k] || 0))))))),
   )
 }
 
@@ -1210,6 +1411,13 @@ function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
       case 'errorSamples': body = React.createElement(ErrorSamplesBody, { card, data: d }); break
       case 'retryCodes': body = React.createElement(RetryCodesBody, { card, data: d }); break
       case 'insights': body = React.createElement(InsightsBody, { card, data: d, onDrill }); break
+      case 'insightErrorDays': body = React.createElement(InsightErrorDaysBody, { card, data: d, theme, onDrill }); break
+      case 'insightTokenSpikes': body = React.createElement(InsightTokenSpikesBody, { card, data: d, theme, onDrill }); break
+      case 'insightRetries': body = React.createElement(InsightRetriesBody, { card, data: d, theme }); break
+      case 'insightSlowTools': body = React.createElement(InsightSlowToolsBody, { card, data: d, theme }); break
+      case 'insightCmdFail': body = React.createElement(InsightCmdFailBody, { card, data: d, theme }); break
+      case 'insightErrorClusters': body = React.createElement(InsightErrorClustersBody, { card, data: d, theme }); break
+      case 'insightSessions': body = React.createElement(InsightSessionsBody, { card, data: d, onDrill }); break
       case 'stack': body = React.createElement(StackBody, { card, cube: d, theme }); break
       case 'treemap': body = React.createElement(TreemapBody, { card, cube: d, theme }); break
       case 'sankey': body = React.createElement(SankeyBody, { card, data: d, theme }); break
