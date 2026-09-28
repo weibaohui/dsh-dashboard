@@ -723,25 +723,22 @@ function RetryCodesBody({ card, data }) {
           }))))
 }
 
-function ErrorSamplesBody({ card, data }) {
+/** 错误样本表（纯样本：时间/类别/来源/项目/内容；行点击下钻所属会话）。聚簇由独立树图卡承担。 */
+function ErrorSamplesBody({ card, data, onDrill }) {
   const eb = data || {}
   const samples = (eb.samples || []).slice(0, 30)
-  const clusters = (eb.clusters || []).slice(0, 6)
   return React.createElement('div', { className: 'dshd-tablewrap' },
-    clusters.length > 0 && React.createElement('div', { style: { padding: '6px 10px', borderBottom: '1px solid var(--dshd-border)' } },
-      React.createElement('div', { className: 'dshd-muted', style: { marginBottom: 4 } }, '错误聚簇 Top（归一后计数）'),
-      clusters.map((c) => React.createElement('div', { key: c.key, style: { fontSize: 11, display: 'flex', gap: 8 } },
-        React.createElement('span', { style: { fontWeight: 700, flex: 'none' } }, '×' + c.n),
-        React.createElement('span', { style: { opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: c.key }, c.key)))),
-    React.createElement('table', { className: 'dshd-table', style: { marginTop: clusters.length ? 0 : 0 } },
+    samples.length === 0 && React.createElement('div', { style: { padding: 12, opacity: 0.6, fontSize: 12 } }, '区间内没有错误样本'),
+    React.createElement('table', { className: 'dshd-table' },
       React.createElement('thead', null, React.createElement('tr', null,
-        ['时间', '类别', '来源', '内容'].map((h) => React.createElement('th', { key: h }, h)))),
+        ['时间', '类别', '来源', '项目', '内容'].map((h) => React.createElement('th', { key: h }, h)))),
       React.createElement('tbody', null,
-        samples.map((e, i) => React.createElement('tr', { key: i },
+        samples.map((e, i) => React.createElement('tr', { key: i, style: { cursor: e.sessionId ? 'pointer' : 'default' }, title: e.sessionId ? '点击查看所属会话' : undefined, onClick: e.sessionId && onDrill ? () => onDrill({ kind: 'session', key: e.sessionId }) : undefined },
           React.createElement('td', { title: e.time ? new Date(e.time).toLocaleString() : '' }, e.time ? new Date(e.time).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'),
           React.createElement('td', null, kindLabel(e.kind || 'OTHER')),
           React.createElement('td', null, (e.source === 'model' ? e.provider || '模型' : e.tool) || '-'),
-          React.createElement('td', { title: e.text, style: { maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.text || '-'))))))
+          React.createElement('td', { className: 'dshd-ellip', style: { maxWidth: 90 }, title: e.project }, e.project || '-'),
+          React.createElement('td', { title: e.text, style: { maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.text || '-'))))))
 }
 
 function InsightsBody({ card, data, onDrill }) {
@@ -1408,7 +1405,7 @@ function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
       case 'calendarHeatmap': body = React.createElement(CalendarBody, { card, cube: d, theme, onDrill }); break
       case 'punchcard': body = React.createElement(PunchBody, { card, data: d, theme }); break
       case 'sessions': body = React.createElement(SessionsBody, { card, data: d, onDrill }); break
-      case 'errorSamples': body = React.createElement(ErrorSamplesBody, { card, data: d }); break
+      case 'errorSamples': body = React.createElement(ErrorSamplesBody, { card, data: d, onDrill }); break
       case 'retryCodes': body = React.createElement(RetryCodesBody, { card, data: d }); break
       case 'insights': body = React.createElement(InsightsBody, { card, data: d, onDrill }); break
       case 'insightErrorDays': body = React.createElement(InsightErrorDaysBody, { card, data: d, theme, onDrill }); break
