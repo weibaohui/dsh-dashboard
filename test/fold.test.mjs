@@ -269,3 +269,215 @@ test('dayDetail / modelDetail / sessionDetail', () => {
   assert.ok(sd.days.length >= 1)
   assert.ok(sd.models['zhanlu/glm-5.2'])
 })
+
+// ── v0.2 新统计：缓存命中率 / 峰谷成本 / 注入 / 人的时间 / 文件活动 / 上下文重放 ──
+
+function ctxEvents(baseTime) {
+  const t = (n) => baseTime + n * 1000
+  return [
+    { type: 'session', seq: 0, time: baseTime, data: { cwd: '/tmp/proj-a', createdAt: baseTime } },
+    { type: 'request/header', seq: 1, time: t(1), data: { header: { config: { model: 'm1', provider: 'p1' }, tools: [{ name: 'read', description: 'd'.repeat(80) }] } } },
+    { type: 'system/message', seq: 2, time: t(2), data: { message: { content: [{ type: 'text', text: 'sys '.repeat(40) }] } } },
+    { type: 'user/message', seq: 3, time: t(3), data: { content: [{ type: 'text', text: 'hello world' }] } },
+    { type: 'user/message', seq: 4, time: t(4), data: { message: { content: [{ type: 'text', text: 'injected ctx' }], source: { kind: 'plugin', plugin: 'dsh-x' } } } },
+    { type: 'step/start', seq: 5, time: t(5), data: { turn: 1, step: 1 } },
+    { type: 'tool/call', seq: 6, time: t(6), data: { callId: 'a1', name: 'ask_user_question', arguments: '{"questions":[]}' } },
+    { type: 'tool/result', seq: 7, time: t(16), data: { message: { isError: false, source: { callId: 'a1' }, content: [{ type: 'text', text: 'answer' }] } } },
+    { type: 'approval/asked', seq: 8, time: t(17), data: { id: 'ap1' } },
+    { type: 'approval/decided', seq: 9, time: t(23), data: { id: 'ap1' } },
+    { type: 'tool/call', seq: 10, time: t(24), data: { callId: 'e1', name: 'edit', arguments: JSON.stringify({ file_path: '/tmp/a.js', old_string: 'a\nb\nc', new_string: 'x\ny' }) } },
+    { type: 'tool/result', seq: 11, time: t(25), data: { meta: {}, message: { isError: false, source: { callId: 'e1' }, content: [{ type: 'text', text: 'ok' }] } } },
+    { type: 'tool/call', seq: 12, time: t(26), data: { callId: 'g1', name: 'grep', arguments: JSON.stringify({ pattern: 'nohit-xyz' }) } },
+    { type: 'tool/result', seq: 13, time: t(27), data: { meta: { shape: 'matches', truncated: false, files: [] }, message: { isError: false, source: { callId: 'g1' }, content: [{ type: 'text', text: '' }] } } },
+    {
+      type: 'assistant/message', seq: 14, time: t(40),
+      data: {
+        turn: 1, step: 1,
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 300, cacheWriteTokens: 20 },
+        stream: [
+          { type: 'chunk', time: t(30), chunk: { type: 'text-delta', text: 'a' } },
+          { type: 'chunk', time: t(32), chunk: { type: 'block-start', blockType: 'reasoning' } },
+          { type: 'chunk', time: t(36), chunk: { type: 'block-start', blockType: 'text' } },
+        ],
+        message: { role: 'assistant', source: { kind: 'model', model: 'm1' }, content: [{ type: 'text', text: 'reply' }] },
+      },
+    },
+    { type: 'compaction/start', seq: 15, time: t(41), data: {} },
+    { type: 'compaction/summary', seq: 16, time: t(42), data: { shadowedTokenCount: 777, shadowedSeqs: [3] } },
+    { type: 'user/message', seq: 17, time: t(43), data: { content: [{ type: 'text', text: 'after compaction' }] } },
+    { type: 'turn/end', seq: 18, time: t(50), data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+}
+
+test('上下文重放：快照构成 / 注入分类 / 压缩移除 / 锚点', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0) // UTC 02:00 → off-peak
+  const fact = fold.foldSession('ctx-s1', ctxEvents(base))
+  const ctx = fold.contextOf(fact)
+  assert.ok(ctx.records.length >= 1, '至少一条请求快照')
+  const r = ctx.records[0]
+  assert.ok(r.sys > 0, 'system prompt 有价')
+  assert.ok(r.tls > 0, '工具 schema 有价')
+  assert.ok(r.usr > 0 && r.inj > 0, '用户/注入分桶')
+  assert.equal(r.asst, 0, '快照在响应加入前')
+  assert.equal(r.pr, 420, '计费输入 = in+cr+cw')
+  assert.equal(r.out, 50)
+  assert.ok(r.tot === r.sys + r.tls + r.usr + r.inj + r.skl + r.asst + r.tool, 'tot 自洽')
+  // 压缩：锚点 + shadowedSeqs 在后续 surface 事件生效（最后一条快照的 usr 不含被移除节点）
+  const anchors = ctx.anchors
+  assert.equal(anchors.length, 1)
+  assert.equal(anchors[0].freed, 777)
+  assert.equal(anchors[0].kind, 'compaction')
+  const last = ctx.records[ctx.records.length - 1]
+  assert.ok(last.usr < r.usr + 30, '压缩后 usr 只含新消息')
+  // 恶意形态不炸：shadowedSeqs 非数组
+  const fact2 = fold.foldSession('ctx-s2', [{ type: 'session', seq: 0, time: base, data: {} }, { type: 'compaction/summary', seq: 1, time: base, data: { shadowedSeqs: 'x' } }])
+  assert.ok(fact2)
+})
+
+test('注入与 skill 统计：injectTok / byInject / skillTok', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('ctx-s1', ctxEvents(base))
+  const day = Object.values(fact.days)[0]
+  assert.ok(day.injectTok > 0, '注入 tokens 累计')
+  assert.ok(day.byInject['dsh-x'] > 0, '按来源分桶')
+  const agg = fold.aggregate([fact], { granularity: 'day', groupBy: 'inject' })
+  assert.ok(agg.rows.some((row) => row.key === 'dsh-x' && row.values.injectTok > 0), 'inject 维度聚合')
+})
+
+test('人的时间：ask_user 窗口 + 审批等待', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('ctx-s1', ctxEvents(base))
+  const day = Object.values(fact.days)[0]
+  assert.equal(day.askUser, 1)
+  assert.equal(day.approvals, 1)
+  assert.equal(day.waitMs, 16000, '问答 10s + 审批 6s')
+  const agg = fold.aggregate([fact], { granularity: 'day', groupBy: '' })
+  assert.equal(agg.rows[0].values.waitMin, 0.3)
+})
+
+test('文件活动：行增删 / 搜索命中 / 无效搜索率', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('ctx-s1', ctxEvents(base))
+  const day = Object.values(fact.days)[0]
+  assert.equal(day.fileWrites, 1)
+  assert.equal(day.linesAdded, 2, 'edit new_string 2 行')
+  assert.equal(day.linesRemoved, 3, 'edit old_string 3 行')
+  assert.equal(day.searches, 1)
+  assert.equal(day.searchesEmpty, 1, '完整 meta 且零命中')
+  const agg = fold.aggregate([fact], { granularity: 'day', groupBy: 'file' })
+  const row = agg.rows.find((r) => r.key === '/tmp/a.js')
+  assert.ok(row, 'file 维度')
+  assert.equal(row.values.fileWrites, 1)
+  assert.equal(row.values.linesAdded, 2)
+  const aggAll = fold.aggregate([fact], { granularity: 'day', groupBy: '' })
+  assert.equal(aggAll.rows[0].values.searchMissRate, 100)
+  const ins = fold.insights([fact], {}, {})
+  assert.ok(ins.hotFiles.some((f) => f.file === '/tmp/a.js' && f.writes === 1), '热点文件榜')
+})
+
+test('TTFT 与解码分桶', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('ctx-s1', ctxEvents(base))
+  const day = Object.values(fact.days)[0]
+  assert.equal(day.ttftSamples, 1)
+  assert.equal(day.ttftMs, 25000, 'step 05s → 首 token 30s')
+  assert.equal(day.reasoningMs, 4000, 'block-start 32s→36s')
+  assert.equal(day.textMs, 4000, 'block-start 36s→assistant 40s')
+  const agg = fold.aggregate([fact], { granularity: 'day', groupBy: '' })
+  const v = agg.rows[0].values
+  assert.equal(v.ttftAvg, 25000)
+  assert.equal(v.thinkShare, 50)
+  const dist = fold.speedDist([fact], { kind: 'ttft' })
+  assert.equal(dist.kind, 'ttft')
+})
+
+test('峰谷成本：off-peak 拆分 + 价格系数', () => {
+  // 2026-09-23 是周三：UTC 07:00 在 06-10 峰值窗内；UTC 12:00 为 off-peak
+  assert.equal(new Date(Date.UTC(2026, 8, 23)).getUTCDay(), 3)
+  const pricing = { m1: { in: 1, out: 1, cr: 1, cw: 1, off: 0.5 } }
+  const mk = (hour) => {
+    const base = Date.UTC(2026, 8, 23, hour, 0, 0)
+    return fold.foldSession('peak-' + hour, [
+      { type: 'session', seq: 0, time: base, data: { cwd: '/tmp/p' } },
+      { type: 'request/header', seq: 1, time: base + 1, data: { header: { config: { model: 'm1', provider: 'deepseek' }, tools: [{ n: 1 }] } } },
+      { type: 'step/start', seq: 2, time: base + 2, data: { turn: 1, step: 1 } },
+      { type: 'assistant/message', seq: 3, time: base + 3000, data: { turn: 1, step: 1, usage: { inputTokens: 1000, outputTokens: 100 }, message: { source: { kind: 'model', model: 'm1' }, content: [] } } },
+    ])
+  }
+  const peakFact = mk(7)
+  const offFact = mk(12)
+  const peakDay = Object.values(peakFact.days)[0]
+  const offDay = Object.values(offFact.days)[0]
+  assert.equal(peakDay.inTokOff, 0, '峰值时刻不进 off 桶')
+  assert.equal(offDay.inTokOff, 1000, 'off-peak 拆分')
+  assert.equal(offDay.outTokOff, 100)
+  const aggPeak = fold.aggregate([peakFact], { granularity: 'day', groupBy: 'model', pricing })
+  const aggOff = fold.aggregate([offFact], { granularity: 'day', groupBy: 'model', pricing })
+  const peakCost = aggPeak.rows[0].values.cost
+  const offCost = aggOff.rows[0].values.cost
+  assert.ok(Math.abs(peakCost - 1100 / 1e6) < 1e-9, '峰值全价')
+  assert.ok(Math.abs(offCost - 550 / 1e6) < 1e-9, 'off-peak 半价')
+})
+
+test('缓存命中率与压缩度量', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('ctx-s1', ctxEvents(base))
+  const agg = fold.aggregate([fact], { granularity: 'day', groupBy: '' })
+  const v = agg.rows[0].values
+  assert.ok(Math.abs(v.cacheHitRate - (300 / 420) * 100) < 0.1, '命中率 = cr/(in+cr+cw)')
+  assert.ok(Math.abs(v.cacheWriteShare - (20 / 420) * 100) < 0.1)
+  assert.equal(v.compactedTok, 777)
+  assert.equal(v.compications ?? v.compactions, v.compactions)
+  const ins = fold.insights([fact], {}, {})
+  assert.ok(ins.compactionHeavy.length === 1 && ins.compactionHeavy[0].compactedTok === 777, '压缩大户带回收量')
+})
+
+test('dist kind=sessions 会话规模直方图', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const mkFact = (id, tok) => fold.foldSession(id, [
+    { type: 'session', seq: 0, time: base, data: { cwd: '/tmp/p' } },
+    { type: 'step/start', seq: 1, time: base + 1, data: { turn: 1, step: 1 } },
+    { type: 'assistant/message', seq: 2, time: base + 2000, data: { turn: 1, step: 1, usage: { inputTokens: tok, outputTokens: 1 }, message: { source: { kind: 'model', model: 'm' }, content: [] } } },
+  ])
+  const dist = fold.speedDist([mkFact('a', 100), mkFact('b', 5000), mkFact('c', 90000)], { kind: 'sessions' })
+  assert.equal(dist.kind, 'sessions')
+  assert.equal(dist.input.n, 3)
+  assert.equal(dist.input.bins.length, 12)
+  assert.ok(dist.input.p50 > 0)
+})
+
+test('图片统计：官方公式估价', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('img-s1', [
+    { type: 'session', seq: 0, time: base, data: { cwd: '/tmp/p' } },
+    { type: 'user/message', seq: 1, time: base + 1, data: { content: [
+      { type: 'text', text: '看图' },
+      { type: 'image', attachment: { width: 800, height: 600 } },
+      { type: 'image', attachment: { width: 100, height: 100 } },
+    ] } },
+  ])
+  const day = Object.values(fact.days)[0]
+  assert.equal(day.images, 2)
+  assert.ok(day.imageTok >= 2 * 117, '每图不低于下限 117')
+  assert.ok(day.imageTok <= 2 * 384, '每图不超上限 384')
+})
+
+test('turnsAborted 进入会话榜', () => {
+  const base = Date.UTC(2026, 8, 23, 2, 0, 0)
+  const fact = fold.foldSession('ab-s1', [
+    { type: 'session', seq: 0, time: base, data: { cwd: '/tmp/p' } },
+    { type: 'turn/start', seq: 1, time: base + 1, data: { turn: 1 } },
+    { type: 'turn/end', seq: 2, time: base + 2, data: { turn: 1, reason: { kind: 'aborted' } } },
+  ])
+  const ins = fold.insights([fact], {}, {})
+  assert.ok(ins.mostAbortedSessions.length === 1 && ins.mostAbortedSessions[0].turnsAborted === 1)
+})
+
+test('新预设页与卡片定义全部通过 validatePage', async () => {
+  const host = (await import('../src/index.js')).default
+  assert.ok(host.__internals, '宿主内部校验器可导入')
+  for (const page of presets.defaultPages()) {
+    const v = host.__internals.validatePage(page)
+    assert.ok(v.ok, `页面 ${page.id} 校验失败: ${v.errors.join('; ')}`)
+  }
+})

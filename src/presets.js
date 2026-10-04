@@ -1,6 +1,6 @@
 'use strict'
 /**
- * dsh-dashboard — 出厂预设：五个页面、指标目录、默认价格表。
+ * dsh-dashboard — 出厂预设：页面布局、指标目录、默认价格表。
  * 页面配置即 JSON（gridstack 布局 + 卡片定义），用户手排 / AI 排都是改这份 JSON。
  */
 
@@ -16,23 +16,24 @@ const CARD_TYPES = Object.freeze({
   sessions: '会话明细表（按最近活动排序）',
   errorSamples: '错误样本表（时间/类别/来源/项目/原文，行点击下钻会话；聚簇看独立树图卡）',
   retryCodes: '供应商 × 错误码榜（LLM 重试分类）',
-  insights: '专项洞察（旧版：11 区合一卡，保留兼容）',
-  insightErrorDays: '专项·异常日错误率榜（横向条形 + 中位参照，点条下钻当日）',
-  insightTokenSpikes: '专项·Token 异常日（×中位数倍数条形，×1 基线，点条下钻当日）',
-  insightRetries: '专项·重试风暴（供应商 × 重试码堆叠条）',
-  insightSlowTools: '专项·慢工具耗时榜（横向条形，label 带调用次数）',
-  insightCmdFail: '专项·命令失败率榜（绿→黄→红严重度条形）',
-  insightErrorClusters: '专项·错误聚簇矩形树图（面积 ∝ 次数，按类别着色）',
-  insightSessions: '专项·会话榜单（五榜合一可排序表，行点击下钻会话）',
+  insights: '洞察（旧版：11 区合一卡，保留兼容）',
+  insightErrorDays: '异常日错误率榜（横向条形 + 中位参照，点条下钻当日）',
+  insightTokenSpikes: 'Token 异常日（×中位数倍数条形，×1 基线，点条下钻当日）',
+  insightRetries: '重试风暴（供应商 × 重试码堆叠条）',
+  insightSlowTools: '慢工具耗时榜（横向条形，label 带调用次数）',
+  insightCmdFail: '命令失败率榜（绿→黄→红严重度条形）',
+  insightErrorClusters: '错误聚簇矩形树图（面积 ∝ 次数，按类别着色）',
+  insightSessions: '会话榜单（五榜合一可排序表，行点击下钻会话）',
   stack: '竖向堆叠柱（时间 × 维度构成）',
   treemap: '层级矩形树图（项目 → 模型 构成，style=sunburst 切旭日）',
   sankey: '供应商 → 项目 流向图',
   themeRiver: '模型活跃主题河流',
   radar: '模型质量雷达（速度/经济性/稳定性/规模/可靠性）',
   parallel: '会话多维平行坐标',
-  boxplot: '速度分布箱线图（按模型）',
+  boxplot: '分布箱线图 · 按模型（query.kind=speed 速度 / ttft 首响应延迟）',
   candle: '每日速度区间 K 线',
-  histogram: '输入长度分布直方图',
+  histogram: '分布直方图（query.kind=input 输入长度 / sessions 会话规模）',
+  contextTrend: '上下文构成趋势（单会话逐请求堆叠 + 压缩锚点，可切会话）',
   gauge: '费用预算仪表盘（需在设置里配置月预算）',
 })
 
@@ -42,13 +43,14 @@ const QUERY_FIELDS = Object.freeze({
   formula: '自定义公式（对 measures 求值，如 pct(inTok, totalTok)）',
   granularity: 'day | week | month',
   range: '天数（如 30）或 "today" | "all"',
-  groupBy: 'model | tool | skill | cmd | slash | project | session |（空=总量）',
+  groupBy: 'model | tool | skill | cmd | slash | file | inject | project | session |（空=总量）',
+  kind: '分布卡数据源：speed | ttft | input | sessions（boxplot/histogram 用）',
   scope: 'all | top（top=不含子代理会话）',
   project: '按项目名过滤（空=全部）',
 })
 
 const GRANULARITIES = ['day', 'week', 'month']
-const GROUP_BYS = ['model', 'project_model', 'tool', 'skill', 'cmd', 'slash', 'project', 'session', '']
+const GROUP_BYS = ['model', 'project_model', 'tool', 'skill', 'cmd', 'slash', 'file', 'inject', 'project', 'session', '']
 const RANGES = ['today', '7', '30', '90', '365', 'all']
 
 /** /api/catalog 返回体（client 卡片编辑器和 AI 提示词共用）。 */
@@ -67,20 +69,24 @@ function catalog() {
   }
 }
 
-/** 默认价格表（每 M token，USD；占位估值，用户可在设置里改）。 */
+/** 分布卡数据源（boxplot/histogram 的 query.kind）。 */
+const DIST_KINDS = ['speed', 'ttft', 'input', 'sessions']
+
+/** 默认价格表（每 M token，USD；占位估值，用户可在设置里改）。
+ *  off：DeepSeek 分时价的 off-peak 系数（官方：工作日 UTC 01-04、06-10 峰值全价，其余半价）。 */
 const DEFAULT_PRICING = {
   'glm-5.2': { in: 0.6, out: 2.2, cr: 0.11, cw: 0.3 },
   'glm-5.3': { in: 0.8, out: 2.8, cr: 0.15, cw: 0.4 },
   'glm-5.3-flash': { in: 0.2, out: 0.8, cr: 0.04, cw: 0.1 },
   'kimi-k3': { in: 0.6, out: 2.5, cr: 0.12, cw: 0.3 },
   'hy3': { in: 0.5, out: 2.0, cr: 0.1, cw: 0.25 },
-  'deepseek-v4-flash': { in: 0.27, out: 1.1, cr: 0.05, cw: 0.14 },
+  'deepseek-v4-flash': { in: 0.27, out: 1.1, cr: 0.05, cw: 0.14, off: 0.5 },
 }
 
 /** 布局小工具：生成 gridstack 的 {x,y,w,h}。 */
 const cell = (x, y, w, h) => ({ x, y, w, h })
 
-/** 七个出厂页。卡片 id 稳定，用户改布局后仍是同一份 JSON 的 patch。 */
+/** 八个出厂页。卡片 id 稳定，用户改布局后仍是同一份 JSON 的 patch。 */
 function defaultPages() {
   return [
     {
@@ -126,7 +132,7 @@ function defaultPages() {
         'cost-stack': { type: 'stack', title: '每日 token 按模型堆叠（30 天）', query: { measures: ['totalTok'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 6 } },
         'cost-treemap': { type: 'treemap', title: '项目 → 模型 费用构成（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', groupBy: 'project_model', scope: 'all' }, options: {} },
         'cost-sankey': { type: 'sankey', title: '供应商 → 项目 费用流向（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
-        'cost-cache': { type: 'line', title: '缓存命中率 %（30 天）', query: { measures: ['cacheReadTok', 'inTok'], formula: 'pct(cacheReadTok, cacheReadTok + inTok)', range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'cost-cache': { type: 'line', title: '缓存命中率 %（30 天）', query: { measures: ['cacheHitRate'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'cost-pie': { type: 'pie', title: '费用构成 · 按模型（30 天）', query: { measures: ['cost'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 8 } },
         'cost-table': { type: 'table', title: '按模型明细（30 天）', query: { measures: ['msgs', 'inTok', 'outTok', 'cost', 'speed'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 12 } },
       },
@@ -171,8 +177,8 @@ function defaultPages() {
         't-skill': { type: 'bar', title: 'skill 调用榜（30 天）', query: { measures: ['skills'], range: '30', granularity: 'day', groupBy: 'skill', scope: 'all' }, options: { top: 12 } },
         't-tool': { type: 'bar', title: '工具调用榜（30 天）', query: { measures: ['toolCalls'], range: '30', granularity: 'day', groupBy: 'tool', scope: 'all' }, options: { top: 12 } },
         't-slash': { type: 'bar', title: '斜杠命令榜（30 天）', query: { measures: ['slashCmds'], range: '30', granularity: 'day', groupBy: 'slash', scope: 'all' }, options: { top: 12 } },
-        't-slow': { type: 'insightSlowTools', title: '专项 · 慢工具耗时榜（30 天）', query: { range: '30', scope: 'all' }, options: {} },
-        't-cmdfail': { type: 'insightCmdFail', title: '专项 · 命令失败率（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        't-slow': { type: 'insightSlowTools', title: '慢工具耗时榜（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        't-cmdfail': { type: 'insightCmdFail', title: '命令失败率（30 天）', query: { range: '30', scope: 'all' }, options: {} },
       },
     },
     {
@@ -210,11 +216,11 @@ function defaultPages() {
         { i: 'e-tools', ...cell(8, 21, 4, 7) },
       ],
       cards: {
-        'e-days': { type: 'insightErrorDays', title: '专项 · 异常日错误率（30 天）', query: { range: '30', scope: 'all' }, options: {} },
-        'e-spikes': { type: 'insightTokenSpikes', title: '专项 · Token 异常日（30 天）', query: { range: '30', scope: 'all' }, options: {} },
-        'e-retries': { type: 'insightRetries', title: '专项 · 重试风暴（30 天）', query: { range: '30', scope: 'all' }, options: {} },
-        'e-clusters': { type: 'insightErrorClusters', title: '专项 · 错误聚簇（30 天）', query: { range: '30', scope: 'all' }, options: {} },
-        'e-sessions': { type: 'insightSessions', title: '专项 · 会话榜单（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        'e-days': { type: 'insightErrorDays', title: '异常日错误率（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        'e-spikes': { type: 'insightTokenSpikes', title: 'Token 异常日（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        'e-retries': { type: 'insightRetries', title: '重试风暴（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        'e-clusters': { type: 'insightErrorClusters', title: '错误聚簇（30 天）', query: { range: '30', scope: 'all' }, options: {} },
+        'e-sessions': { type: 'insightSessions', title: '会话榜单（30 天）', query: { range: '30', scope: 'all' }, options: {} },
         'e-trend': { type: 'line', title: '错误趋势：回合错误 / 重试 / 工具报错（30 天）', query: { measures: ['turnsError', 'retries', 'toolErrors'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
         'e-codes': { type: 'retryCodes', title: '供应商 × 错误码（30 天）', query: { range: '30', scope: 'all' }, options: {} },
         'e-samples': { type: 'errorSamples', title: '错误样本（30 天）', query: { range: '30', scope: 'all' }, options: {} },
@@ -246,7 +252,40 @@ function defaultPages() {
         'i-hist': { type: 'histogram', title: '输入长度分布（30 天）', query: { range: '30', granularity: 'day', scope: 'all' }, options: {} },
       },
     },
+    {
+      id: 'context',
+      title: '上下文与效率',
+      cols: 12,
+      layout: [
+        { i: 'x-trend', ...cell(0, 0, 12, 7) },
+        { i: 'x-cache', ...cell(0, 7, 6, 5) },
+        { i: 'x-ttft', ...cell(6, 7, 6, 5) },
+        { i: 'x-think', ...cell(0, 12, 6, 5) },
+        { i: 'x-inject', ...cell(6, 12, 6, 5) },
+        { i: 'x-wait', ...cell(0, 17, 3, 3) },
+        { i: 'x-approvals', ...cell(3, 17, 3, 3) },
+        { i: 'x-compacted', ...cell(6, 17, 3, 3) },
+        { i: 'x-ask', ...cell(9, 17, 3, 3) },
+        { i: 'x-lines', ...cell(0, 20, 6, 5) },
+        { i: 'x-files', ...cell(6, 20, 6, 5) },
+        { i: 'x-sesshist', ...cell(0, 25, 12, 5) },
+      ],
+      cards: {
+        'x-trend': { type: 'contextTrend', title: '上下文构成趋势（近 30 天最大会话）', query: { range: '30', scope: 'all' }, options: {} },
+        'x-cache': { type: 'line', title: '缓存命中率 %（30 天 · 按模型）', query: { measures: ['cacheHitRate'], range: '30', granularity: 'day', groupBy: 'model', scope: 'all' }, options: { top: 6 } },
+        'x-ttft': { type: 'boxplot', title: '首响应延迟分布 · 按模型（30 天）', query: { kind: 'ttft', range: '30', granularity: 'day', scope: 'all' }, options: { top: 6 } },
+        'x-think': { type: 'line', title: '思考时间占比 %（30 天）', query: { measures: ['thinkShare'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'x-inject': { type: 'bar', title: '注入上下文来源榜（30 天 · tokens）', query: { measures: ['injectTok'], range: '30', granularity: 'day', groupBy: 'inject', scope: 'all' }, options: { top: 10 } },
+        'x-wait': { type: 'stat', title: '30 天用户等待', query: { measures: ['waitMin'], range: '30', granularity: 'day', scope: 'all' }, options: { unit: '分钟' } },
+        'x-approvals': { type: 'stat', title: '30 天审批次数', query: { measures: ['approvals'], range: '30', granularity: 'day', scope: 'all' }, options: { unit: '次' } },
+        'x-compacted': { type: 'stat', title: '30 天压缩回收 tokens', query: { measures: ['compactedTok'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'x-ask': { type: 'stat', title: '30 天向用户提问', query: { measures: ['askUser'], range: '30', granularity: 'day', scope: 'all' }, options: { unit: '次' } },
+        'x-lines': { type: 'line', title: '每日代码行增删（30 天）', query: { measures: ['linesAdded', 'linesRemoved'], range: '30', granularity: 'day', scope: 'all' }, options: {} },
+        'x-files': { type: 'bar', title: '文件写入榜（30 天）', query: { measures: ['fileWrites'], range: '30', granularity: 'day', groupBy: 'file', scope: 'all' }, options: { top: 10 } },
+        'x-sesshist': { type: 'histogram', title: '会话规模分布（30 天）', query: { kind: 'sessions', range: '30', granularity: 'day', scope: 'all' }, options: {} },
+      },
+    },
   ]
 }
 
-module.exports = { CARD_TYPES, QUERY_FIELDS, GRANULARITIES, GROUP_BYS, RANGES, catalog, DEFAULT_PRICING, defaultPages }
+module.exports = { CARD_TYPES, QUERY_FIELDS, GRANULARITIES, GROUP_BYS, RANGES, DIST_KINDS, catalog, DEFAULT_PRICING, defaultPages }

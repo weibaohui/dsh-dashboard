@@ -289,15 +289,17 @@ function fmtDuration(min) {
 function fmtMeasure(measure, v) {
   if (measure === 'cost') return fmtMoney(v)
   if (measure === 'speed') return fmtNum(v) + ' tok/s'
-  if (measure === 'errorRate') return v.toFixed(1) + '%'
+  if (measure === 'errorRate' || measure === 'cacheHitRate' || measure === 'cacheWriteShare' || measure === 'thinkShare' || measure === 'searchMissRate') return (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(1) : '0') + '%'
   if (measure === 'userMsgs') return fmtNum(v) + ' 次'
   if (measure === 'userInputChars') return fmtNum(v) + ' 字'
   if (measure === 'inputAvg') return fmtNum(v) + ' 字/条'
-  if (measure === 'activeMin') return fmtDuration(v)
-  if (measure === 'subagents') return fmtNum(v) + ' 次'
+  if (measure === 'activeMin' || measure === 'waitMin') return fmtDuration(v)
+  if (measure === 'subagents' || measure === 'approvals' || measure === 'askUser') return fmtNum(v) + ' 次'
+  if (measure === 'ttftAvg' || measure === 'ttftMs' || measure === 'reasoningMs' || measure === 'textMs' || measure === 'toolArgMs') return fmtNum(v) + ' ms'
+  if (measure === 'images') return fmtNum(v) + ' 张'
   return fmtNum(v)
 }
-const MEASURE_UNITS = { cost: 'USD', speed: 'tok/s', errorRate: '%', userMsgs: '次', userInputChars: '字', inputAvg: '字/条', activeMin: '分钟', subagents: '次' }
+const MEASURE_UNITS = { cost: 'USD', speed: 'tok/s', errorRate: '%', cacheHitRate: '%', cacheWriteShare: '%', thinkShare: '%', searchMissRate: '%', userMsgs: '次', userInputChars: '字', inputAvg: '字/条', activeMin: '分钟', subagents: '次', waitMin: '分钟', ttftAvg: 'ms', images: '张', approvals: '次', askUser: '次' }
 
 // ── 卡片数据获取（带 60s 缓存，重挂载不重新打后端）───────────────────────────
 const dataCache = new Map()
@@ -343,10 +345,15 @@ async function loadCardData(card) {
     return loadInsights(q)
   }
   if (type === 'boxplot' || type === 'candle') {
-    return cachedFetch('dist-speed|' + rangeQuery(q), () => api('GET', '/dist?kind=speed&' + rangeQuery(q)))
+    const kind = q.kind === 'ttft' ? 'ttft' : 'speed'
+    return cachedFetch('dist-' + kind + '|' + rangeQuery(q), () => api('GET', '/dist?kind=' + kind + '&' + rangeQuery(q)))
   }
   if (type === 'histogram') {
-    return cachedFetch('dist-input|' + rangeQuery(q), () => api('GET', '/dist?kind=input&' + rangeQuery(q)))
+    const kind = q.kind === 'sessions' ? 'sessions' : 'input'
+    return cachedFetch('dist-' + kind + '|' + rangeQuery(q), () => api('GET', '/dist?kind=' + kind + '&' + rangeQuery(q)))
+  }
+  if (type === 'contextTrend') {
+    return cachedFetch('sessions-ctx|' + rangeQuery(q), () => api('GET', '/sessions?' + rangeQuery(q) + '&limit=30'))
   }
   if (type === 'sankey') {
     const measure = (q.measures && q.measures[0]) === 'cost' ? 'cost' : 'outTok'
@@ -365,7 +372,7 @@ async function loadCardData(card) {
   return data
 }
 
-/** 深度数据：错误专项 / 专项洞察。 */
+/** 深度数据：错误分析 / 洞察卡。 */
 async function loadErrors(q) {
   return cachedFetch('errors|' + rangeQuery(q), () => api('GET', '/errors?' + rangeQuery(q)))
 }
@@ -693,7 +700,7 @@ function SessionsBody({ card, data, onDrill }) {
           React.createElement('td', null, fmtMoney(r.cost)))))))
 }
 
-// ── 错误专项卡片 ─────────────────────────────────────────────────────────────
+// ── 错误分析卡片 ─────────────────────────────────────────────────────────────
 const KIND_LABELS = {
   RATE_LIMIT: '限流/配额', SERVER: '服务端 5xx', TIMEOUT: '超时', EMPTY_RESPONSE: '空响应',
   TRANSPORT: '传输', NETWORK: '网络', AUTH: '认证', ABORTED: '中止',
@@ -769,7 +776,7 @@ function InsightsBody({ card, data, onDrill }) {
   )
 }
 
-// ── 专项洞察独立卡（每个专项一张卡，各用最合身的图型）───────────────────────
+// ── 洞察独立卡（每类一张卡，各用最合身的图型）───────────────────────
 const RETRY_CODES = ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'EMPTY_RESPONSE', 'TRANSPORT']
 const RETRY_CODE_COLORS = { RATE_LIMIT: '#e8684a', SERVER: '#f6bd16', TIMEOUT: '#6dc8ec', EMPTY_RESPONSE: '#9270ca', TRANSPORT: '#5d7092' }
 
@@ -802,7 +809,7 @@ function hbarOption(theme, cats, values, opt) {
   }
 }
 
-/** 专项·异常日错误率（红系深浅按严重度，中位虚线参照，点条下钻当日）。 */
+/** 异常日错误率（红系深浅按严重度，中位虚线参照，点条下钻当日）。 */
 function InsightErrorDaysBody({ data, theme, onDrill }) {
   const rows = (data && data.worstErrorDays) || []
   const med = (data && data.medErrorRate) || 0
@@ -821,7 +828,7 @@ function InsightErrorDaysBody({ data, theme, onDrill }) {
   return React.createElement('div', { className: 'dshd-chart', ref })
 }
 
-/** 专项·Token 异常日（×中位数倍数条形，×1 基线，点条下钻当日）。 */
+/** Token 异常日（×中位数倍数条形，×1 基线，点条下钻当日）。 */
 function InsightTokenSpikesBody({ data, theme, onDrill }) {
   const rows = (data && data.tokenSpikeDays) || []
   const option = React.useMemo(() => (rows.length ? hbarOption(theme,
@@ -837,7 +844,7 @@ function InsightTokenSpikesBody({ data, theme, onDrill }) {
   return React.createElement('div', { className: 'dshd-chart', ref })
 }
 
-/** 专项·重试风暴（供应商 × 重试码堆叠条：一眼看出为什么重试）。 */
+/** 重试风暴（供应商 × 重试码堆叠条：一眼看出为什么重试）。 */
 function InsightRetriesBody({ data, theme }) {
   const rows = (data && data.retryTopProviders) || []
   const codes = React.useMemo(() => {
@@ -866,7 +873,7 @@ function InsightRetriesBody({ data, theme }) {
   return React.createElement('div', { className: 'dshd-chart', ref })
 }
 
-/** 专项·慢工具耗时榜（label 带调用次数）。 */
+/** 慢工具耗时榜（label 带调用次数）。 */
 function InsightSlowToolsBody({ data, theme }) {
   const rows = (data && data.slowTools) || []
   const fmtMs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms) + 'ms')
@@ -883,7 +890,7 @@ function InsightSlowToolsBody({ data, theme }) {
   return React.createElement('div', { className: 'dshd-chart', ref })
 }
 
-/** 专项·命令失败率（绿→黄→红按严重度，label 带失败/总调用）。 */
+/** 命令失败率（绿→黄→红按严重度，label 带失败/总调用）。 */
 function InsightCmdFailBody({ data, theme }) {
   const rows = (data && data.cmdFailRate) || []
   const option = React.useMemo(() => (rows.length ? hbarOption(theme,
@@ -900,7 +907,7 @@ function InsightCmdFailBody({ data, theme }) {
   return React.createElement('div', { className: 'dshd-chart', ref })
 }
 
-/** 专项·错误聚簇矩形树图（面积 ∝ 次数，按错误类别着色）。 */
+/** 错误聚簇矩形树图（面积 ∝ 次数，按错误类别着色）。 */
 function InsightErrorClustersBody({ data, theme }) {
   const rows = (data && data.errorClusters) || []
   const kinds = React.useMemo(() => [...new Set(rows.map((r) => r.kind || 'OTHER'))], [rows])
@@ -926,22 +933,23 @@ function InsightErrorClustersBody({ data, theme }) {
   return React.createElement('div', { className: 'dshd-chart', ref })
 }
 
-/** 专项·会话榜单合并表（费用/失败/输入/时长/压缩五榜合一，点表头排序，点行下钻会话）。 */
+/** 会话榜单合并表（费用/失败/输入/时长/压缩五榜合一，点表头排序，点行下钻会话）。 */
 function InsightSessionsBody({ data, onDrill }) {
   const rows = React.useMemo(() => {
     const d = data || {}
     const map = new Map()
     const put = (arr, fill) => (arr || []).forEach((s) => {
       if (!s || !s.sessionId) return
-      const cur = map.get(s.sessionId) || { sessionId: s.sessionId, project: s.project || '', title: s.title || '', cost: 0, turnsError: 0, userMsgs: 0, durationMin: 0, compactions: 0 }
+      const cur = map.get(s.sessionId) || { sessionId: s.sessionId, project: s.project || '', title: s.title || '', cost: 0, turnsError: 0, turnsAborted: 0, userMsgs: 0, durationMin: 0, compactions: 0, compactedTok: 0 }
       fill(cur, s)
       map.set(s.sessionId, cur)
     })
     put(d.topCostSessions, (c, s) => { c.cost = s.cost })
     put(d.mostErrorSessions, (c, s) => { c.turnsError = s.turnsError })
+    put(d.mostAbortedSessions, (c, s) => { c.turnsAborted = s.turnsAborted })
     put(d.topInputSessions, (c, s) => { c.userMsgs = s.userMsgs })
     put(d.longestSessions, (c, s) => { c.durationMin = s.durationMin })
-    put(d.compactionHeavy, (c, s) => { c.compactions = s.compactions })
+    put(d.compactionHeavy, (c, s) => { c.compactions = s.compactions; c.compactedTok = s.compactedTok || 0 })
     return [...map.values()]
   }, [data])
   const [sort, setSort] = React.useState({ key: 'cost', dir: -1 })
@@ -949,9 +957,11 @@ function InsightSessionsBody({ data, onDrill }) {
     { k: 'title', t: '会话' },
     { k: 'cost', t: '费用', fmt: fmtMoney },
     { k: 'turnsError', t: '失败', fmt: (v) => fmtNum(v) },
+    { k: 'turnsAborted', t: '中止', fmt: (v) => fmtNum(v) },
     { k: 'userMsgs', t: '输入', fmt: (v) => fmtNum(v) + ' 次' },
     { k: 'durationMin', t: '时长', fmt: fmtDuration },
     { k: 'compactions', t: '压缩', fmt: (v) => fmtNum(v) },
+    { k: 'compactedTok', t: '回收', fmt: (v) => fmtNum(v) },
   ]
   const sorted = React.useMemo(() => [...rows].sort((a, b) => {
     if (sort.key === 'title') return String(a.title).localeCompare(String(b.title)) * sort.dir
@@ -1330,7 +1340,7 @@ function HistBody({ card, data, theme }) {
         itemStyle: { color: '#5b8ff9', opacity: 0.85 },
         label: { show: true, position: 'top', color: theme.sub, fontSize: 9, formatter: (p) => (p.value > 0 ? p.value : '') },
       }],
-      graphic: input.p50 ? [{ type: 'text', right: 12, top: 8, style: { text: '中位数 ' + fmtNum(input.p50) + ' 字', fill: theme.sub, fontSize: 11 } }] : [],
+      graphic: input.p50 ? [{ type: 'text', right: 12, top: 8, style: { text: '中位数 ' + fmtNum(input.p50), fill: theme.sub, fontSize: 11 } }] : [],
     }
   }, [data, card, theme])
   const ref = useECharts(option)
@@ -1365,6 +1375,100 @@ function GaugeBody({ card, data, theme }) {
     React.createElement('div', { className: 'dshd-chart', ref, style: { flex: 1, minHeight: 0 } }),
     React.createElement('div', { className: 'dshd-stat-u', style: { textAlign: 'center', padding: '0 8px 6px' } },
       hasBudget ? '本月预算 ' + fmtMoney(budget) + ' · 已用 ' + Math.round(pct) + '%' : '未设月预算（⚙ 设置里配置）'),
+  )
+}
+
+// ── 上下文构成趋势（单会话逐请求 surface 快照 + 压缩锚点）───────────────────
+const CTX_CATS = [
+  ['sys', '系统提示', '#5b8ff9'],
+  ['tls', '工具 Schema', '#6dc8ec'],
+  ['usr', '用户输入', '#5ad8a6'],
+  ['inj', '注入上下文', '#f6bd16'],
+  ['skl', 'Skill', '#9270ca'],
+  ['asst', '助手回复', '#e8684a'],
+  ['tool', '工具结果', '#ff9d4d'],
+]
+function ContextTrendBody({ card, data, theme }) {
+  const rows = (data && data.rows) || []
+  const [sel, setSel] = React.useState('')
+  const [ctx, setCtx] = React.useState(null)
+  const [err, setErr] = React.useState('')
+  const sid = sel || (rows[0] && rows[0].sessionId) || ''
+  React.useEffect(() => {
+    let alive = true
+    setCtx(null)
+    setErr('')
+    if (!sid) return undefined
+    api('GET', '/context/' + encodeURIComponent(sid))
+      .then((c) => { if (alive) setCtx(c) })
+      .catch((e) => { if (alive) setErr(String((e && e.message) || e)) })
+    return () => { alive = false }
+  }, [sid])
+  const option = React.useMemo(() => {
+    const records = (ctx && ctx.records) || []
+    if (!records.length) return null
+    const anchors = (ctx && ctx.anchors) || []
+    // 压缩锚点对齐到最近一次快照
+    const anchorPts = anchors.map((a) => {
+      let best = 0
+      let bestDist = Infinity
+      records.forEach((r, i) => {
+        const d = Math.abs((r.t || 0) - (a.t || 0))
+        if (d < bestDist) { bestDist = d; best = i }
+      })
+      return { i: best, kind: a.kind, freed: a.freed || 0 }
+    }).filter((p, idx, arr) => arr.findIndex((q) => q.i === p.i) === idx)
+    return {
+      ...baseOption(theme),
+      grid: { left: 8, right: 12, top: 28, bottom: 6, containLabel: true },
+      legend: { ...baseOption(theme).legend, data: CTX_CATS.map((c) => c[1]), top: 0, textStyle: { color: theme.sub, fontSize: 10 } },
+      tooltip: { ...baseOption(theme).tooltip, formatter: (ps) => {
+        const r = records[ps[0].dataIndex] || {}
+        const lines = [ps[0].axisValue + ' · 请求 #' + (r.seq || '-')]
+        for (const p of ps) lines.push(p.marker + p.seriesName + ' ' + fmtNum(p.value))
+        lines.push('合计 ' + fmtNum(r.tot) + (r.pr ? '（计费 ' + fmtNum(r.pr) + '）' : ''))
+        return lines.join('<br/>')
+      } },
+      xAxis: { type: 'category', data: records.map((r, i) => '#' + (i + 1)), axisLabel: { color: theme.sub, fontSize: 9 } },
+      yAxis: { type: 'value', axisLabel: { color: theme.sub, fontSize: 9, formatter: (v) => fmtNum(v) }, splitLine: { lineStyle: { color: theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' } } },
+      series: [
+        ...CTX_CATS.map(([k, name, color]) => ({
+          name,
+          type: 'line',
+          stack: 'ctx',
+          symbol: 'none',
+          lineStyle: { width: 0 },
+          areaStyle: { color, opacity: 0.85 },
+          emphasis: { focus: 'series' },
+          data: records.map((r) => r[k] || 0),
+        })),
+        {
+          name: '压缩',
+          type: 'scatter',
+          symbol: 'pin',
+          symbolSize: 12,
+          itemStyle: { color: '#e8684a' },
+          data: anchorPts.map((p) => ({ value: [p.i, records[p.i] ? records[p.i].tot : 0], freed: p.freed, kind: p.kind })),
+          tooltip: { show: false },
+          z: 5,
+        },
+      ],
+    }
+  }, [ctx, theme])
+  const ref = useECharts(option)
+  if (!rows.length) return insightEmpty('区间内没有会话')
+  const cur = rows.find((r) => r.sessionId === sid)
+  return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '2px 4px 6px' } },
+      React.createElement('select', {
+        value: sid,
+        onChange: (e) => setSel(e.target.value),
+        style: { maxWidth: '70%', fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid ' + (theme.dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)'), background: 'transparent', color: theme.text },
+      }, rows.map((r) => React.createElement('option', { key: r.sessionId, value: r.sessionId }, (r.title || r.sessionId.slice(0, 24)) + ' · ' + fmtNum(r.totalTok) + ' tok'))),
+      React.createElement('span', { className: 'dshd-muted', style: { fontSize: 10 } },
+        cur ? fmtNum(cur.turns) + ' 回合 · ' + fmtMoney(cur.cost) : '')),
+    err ? React.createElement('div', { className: 'dshd-err', style: { padding: 10 } }, err)
+      : React.createElement('div', { className: 'dshd-chart', ref, style: { flex: 1, minHeight: 0 } }),
   )
 }
 
@@ -1424,6 +1528,7 @@ function CardView({ card, editing, onDelete, onEdit, theme, onDrill }) {
       case 'boxplot': body = React.createElement(BoxBody, { card, data: d, theme }); break
       case 'candle': body = React.createElement(CandleBody, { card, data: d, theme }); break
       case 'histogram': body = React.createElement(HistBody, { card, data: d, theme }); break
+      case 'contextTrend': body = React.createElement(ContextTrendBody, { card, data: d, theme }); break
       case 'gauge': body = React.createElement(GaugeBody, { card, data: d, theme }); break
       default: body = React.createElement('div', { style: { padding: 10, opacity: 0.6 } }, `未知类型：${card.type}`)
     }
@@ -1821,7 +1926,7 @@ function DashboardPanel({ variant }) {
     if (t && t.trim()) persistPages(pages.map((p) => (p.id === page.id ? { ...p, title: t.trim() } : p)))
   }
   const resetPages = async () => {
-    if (!confirm('恢复出厂五个预设页？自定义页面会丢失。')) return
+    if (!confirm('恢复出厂预设页？自定义页面会丢失。')) return
     try {
       const r = await api('POST', '/pages/reset')
       setPages(r.pages)
@@ -1938,7 +2043,7 @@ function DashboardPanel({ variant }) {
           React.createElement('span', { className: 'dshd-mi-d' }, '描述需求生成提示词，AI 返回整页配置一键导入')),
         React.createElement('button', { className: 'dshd-mi', onClick: () => { setPop(false); resetPages() } },
           React.createElement('span', { className: 'dshd-mi-t' }, '恢复出厂预设页'),
-          React.createElement('span', { className: 'dshd-mi-d' }, '还原六个出厂页面，自定义页面会丢失')),
+          React.createElement('span', { className: 'dshd-mi-d' }, '还原出厂页面，自定义页面会丢失')),
 
         React.createElement('div', { className: 'dshd-sec-t' }, '费用'),
         React.createElement('button', { className: 'dshd-mi', onClick: () => { setPop(false); setModal({ kind: 'pricing' }) } },

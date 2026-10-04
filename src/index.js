@@ -26,6 +26,8 @@ const PLUGIN_ID = 'dsh-dashboard'
 const API_PREFIX = '/dsh-dashboard/api'
 const MAX_BODY_BYTES = 1024 * 1024
 const PAGE_COUNT_MAX = 20
+// 折叠层事实结构版本：字段/口径变更时 +1，扫描时检测到旧版本即强制全量重扫
+const FOLD_VERSION = 2
 
 // ── 会话文件发现与解压 ────────────────────────────────────────────────────────
 
@@ -196,6 +198,7 @@ function normalizeQuery(raw) {
     q.measures = raw.measures.filter((m) => typeof m === 'string' && fold.MEASURES[m]).slice(0, 6)
   }
   if (typeof raw.formula === 'string') q.formula = raw.formula.slice(0, 300)
+  if (presets.DIST_KINDS.includes(raw.kind)) q.kind = raw.kind
   if (presets.GRANULARITIES.includes(raw.granularity)) q.granularity = raw.granularity
   if (raw.groupBy === '' || presets.GROUP_BYS.includes(raw.groupBy)) q.groupBy = raw.groupBy
   if (raw.scope === 'top' || raw.scope === 'all') q.scope = raw.scope
@@ -258,7 +261,10 @@ function normalizePricing(raw) {
     if (!p || typeof p !== 'object') continue
     const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0)
     const key = String(model).slice(0, 80)
-    out[key] = { in: num(p.in), out: num(p.out), cr: num(p.cr), cw: num(p.cw) }
+    const entry = { in: num(p.in), out: num(p.out), cr: num(p.cr), cw: num(p.cw) }
+    // off：DeepSeek 等分时价的 off-peak 系数（0-1 开区间），其余视为不分时
+    if (typeof p.off === 'number' && Number.isFinite(p.off) && p.off > 0 && p.off < 1) entry.off = p.off
+    out[key] = entry
   }
   return out
 }
@@ -378,7 +384,14 @@ module.exports = {
           const stored = await table.get('scanMeta')
           if (stored && typeof stored.files === 'object') meta = stored
         } catch { /* ignore */ }
-        const todo = files.filter((f) => full || meta.files[f.path] !== f.mtime)
+        // 折叠结构升级：旧版本事实缺新字段，强制全量重扫一次
+        let forcedFull = false
+        if (meta.foldVersion !== FOLD_VERSION) {
+          meta.foldVersion = FOLD_VERSION
+          meta.files = {}
+          forcedFull = true
+        }
+        const todo = files.filter((f) => full || forcedFull || meta.files[f.path] !== f.mtime)
         scanState.progress.total = todo.length
         for (const f of todo) {
           try {
@@ -465,6 +478,7 @@ module.exports = {
     async function speedDistData(qp) {
       const range = resolveRange(qp.get('range') || '30')
       return fold.speedDist(listFacts(), {
+        kind: qp.get('kind') || 'speed',
         scope: qp.get('scope') === 'top' ? 'top' : 'all',
         project: qp.get('project') || '',
         from: qp.get('from') || range.from,
@@ -649,9 +663,9 @@ module.exports = {
               return
             }
 
-            // ── 参数化下钻：/day/:date /model/:model /session/:id ──────────
+            // ── 参数化下钻：/day/:date /model/:model /session/:id /context/:id ──
             const rest = path.startsWith(API_PREFIX + '/') ? path.slice(API_PREFIX.length + 1) : ''
-            const drill = /^(day|model|session)\/(.+)$/.exec(rest)
+            const drill = /^(day|model|session|context)\/(.+)$/.exec(rest)
             if (req.method === 'GET' && drill) {
               const pricing = await currentPricing()
               const scope = qp.get('scope') === 'top' ? 'top' : 'all'
@@ -671,6 +685,18 @@ module.exports = {
                 const detail = fold.sessionDetail(factsById.get(key), pricing)
                 if (!detail) { sendJson(404, { error: 'session not found' }); return }
                 sendJson(200, detail)
+                return
+              }
+              if (drill[1] === 'context') {
+                await ensureFactsLoaded()
+                const fact = factsById.get(key)
+                if (!fact) { sendJson(404, { error: 'session not found' }); return }
+                sendJson(200, {
+                  sessionId: fact.sessionId,
+                  project: fact.project,
+                  title: fact.title,
+                  ...fold.contextOf(fact),
+                })
                 return
               }
             }
