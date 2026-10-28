@@ -37,7 +37,14 @@ echarts.use([
   ParallelComponent, SingleAxisComponent, MarkLineComponent, CanvasRenderer,
 ])
 
-const API = '/dsh-dashboard/api'
+// API 基址随页面走：子路径反代（如 https://host/app/dsh/）下，绝对路径 /dsh-dashboard/api
+// 会打到站点根而 404。与宿主官方客户端一致，用 document.baseURI 推导（dsh-sync#14 同款）。
+const API = (() => {
+  try {
+    const base = (typeof document !== 'undefined' && document.baseURI) || (typeof location !== 'undefined' ? location.href : '/')
+    return new URL('dsh-dashboard/api', new URL('.', base)).pathname.replace(/\/+$/, '')
+  } catch { return '/dsh-dashboard/api' }
+})()
 const PLUGIN_ID = '@weibaohui/dsh-dashboard'
 const SLOT_ORDER = 36
 
